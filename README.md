@@ -70,6 +70,23 @@ logger.Info("Hello World")
 // {"severity":"INFO","message":"Hello World","logging.googleapis.com/trace":"projects/YOUR_PROJECT_ID/traces/00000000000000000000000000000000","logging.googleapis.com/spanId":"0000000000000000","logging.googleapis.com/trace_sampled":true}
 ```
 
+If you use [go.opencensus.io/trace](https://pkg.go.dev/go.opencensus.io/trace), it is able to set traceId with request context like the below:
+
+```go
+import (
+	"contrib.go.opencensus.io/exporter/stackdriver/propagation"
+	"go.opencensus.io/plugin/ochttp"
+)
+
+handler := &ochttp.Handler{Propagation: &propagation.HTTPFormat{}}
+handler.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	logger = logger.WithContext(r.Context())
+	logger.Info("Hello World") // This log should include trace information.
+})
+```
+
+You can see [example for Cloud Run](./examples/cloudrun).
+
 #### Labels
 
 You can add any "labels" to your log as following:

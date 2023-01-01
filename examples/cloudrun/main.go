@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"contrib.go.opencensus.io/exporter/stackdriver"
+	"contrib.go.opencensus.io/exporter/stackdriver/propagation"
 	"github.com/kitagry/slogdriver"
 	"go.opencensus.io/plugin/ochttp"
 	"go.opencensus.io/trace"
@@ -60,5 +61,5 @@ func initTrace() {
 }
 
 func withTrace(h http.Handler) http.Handler {
-	return &ochttp.Handler{Handler: h}
+	return &ochttp.Handler{Handler: h, Propagation: &propagation.HTTPFormat{}}
 }
