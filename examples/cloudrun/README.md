@@ -22,6 +22,10 @@ curl https://YOUR_CLOUD_RUN_ENDPOINT/
 
 You can see your [Cloud Run](https://console.cloud.google.com/run) and see log.
 
+This sample uses Cloud trace, and you can see all logs for one request with the same trace_id, as show below.
+
+![picture](./cloudrun.png)
+
 ## Clean up
 
 ```bash
