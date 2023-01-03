@@ -120,10 +120,10 @@ You can set common label like the follow:
 
 ```go
 logger = logger.With(slog.Group(slogdriver.LabelKey, slog.String("commonLabel", "hoge")))
-logger.Info("Hello World", slogdriver.LabelKey, slog.String("label1", "fuga"))
+logger.Info("Hello World", slog.Group(slogdriver.LabelKey, slog.String("label1", "fuga")))
 // got:
 // {"severity":"INFO","message":"Hello World","logging.googleapis.com/labels":{"commonLabel":"hoge","label1":"fuga"}}
-logger.Warn("Hello World", slogdriver.LabelKey, slog.String("label2", "fuga"))
+logger.Warn("Hello World", slog.Group(slogdriver.LabelKey, slog.String("label2", "fuga")))
 // got:
 // {"severity":"WARNING","message":"Hello World","logging.googleapis.com/labels":{"commonLabel":"hoge","label2":"fuga"}}
 ```
