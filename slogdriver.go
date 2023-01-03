@@ -1,7 +1,6 @@
 package slogdriver
 
 import (
-	"fmt"
 	"io"
 	"os"
 
@@ -36,11 +35,13 @@ type HandlerOptions struct {
 	// attribute to the output indicating the source code position of the log statement. AddSource is false by default
 	// to skip the cost of computing this information.
 	AddSource bool
-}
 
-type LogEntrySourceLocation struct {
-	File string `json:"file"`
-	Line string `json:"line"`
+	// Level reports the minimum record level that will be logged.
+	// The handler discards records with lower levels.
+	// If Level is nil, the handler assumes LevelInfo.
+	// The handler calls Level.Level for each record processed;
+	// to adjust the minimum level dynamically, use a LevelVar.
+	Level slog.Leveler
 }
 
 func New(w io.Writer, opts HandlerOptions) *slog.Logger {
@@ -53,14 +54,14 @@ func NewHandler(w io.Writer, opts HandlerOptions) slog.Handler {
 	}
 
 	slogOpts := slog.HandlerOptions{
+		// AddSource is handled in Handle method. So, this option is false.
+		// see cloudLoggingHandler.makeSourceLocationAttr.
 		AddSource: false,
+		Level:     opts.Level,
 		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
 			switch a.Key {
 			case slog.LevelKey:
-				val := a.Value.String()
-				if val == slog.LevelWarn.String() {
-					val = "WARNING"
-				}
+				val := levelStringToSeverity(a.Value.String())
 				return slog.Attr{
 					Key:   SeverityKey,
 					Value: slog.StringValue(val),
@@ -106,11 +107,7 @@ func (c *cloudLoggingHandler) Handle(r slog.Record) error {
 	}
 
 	if c.opts.AddSource {
-		f, line := r.SourceLine()
-		newRecord.AddAttrs(slog.Any(SourceLocationKey, LogEntrySourceLocation{
-			File: f,
-			Line: fmt.Sprint(line),
-		}))
+		newRecord.AddAttrs(c.makeSourceLocationAttr(r))
 	}
 
 	c.handleTrace(&newRecord)

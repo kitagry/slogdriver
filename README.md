@@ -24,6 +24,27 @@ logger.Info("Hello World!", slog.String("key", "value"))
 
 If your log follows [LogEntry](https://cloud.google.com/logging/docs/reference/v2/rest/v2/LogEntry) format, you can query logs or create metrics alert easier and efficiently on GCP Cloud Logging console.
 
+#### Severity
+
+You can use slog.Level(Debug, Info, Warn, Error). And this library prepare [all severities for Cloud Logging](https://cloud.google.com/logging/docs/reference/v2/rest/v2/LogEntry#LogSeverity).
+
+* DEFAULT
+* DEBUG
+* INFO
+* NOTICE
+* WARNING
+* ERROR
+* CRITICAL
+* ALERT
+* EMERGENCY
+
+```go
+logger := slogdriver.New(os.Stdout, slogdriver.HandlerOptions{
+  Level: slogdriver.LevelDefault,
+})
+logger.Log(slogdriver.LevelEmergency, "emergency msg")
+```
+
 #### HTTP request
 
 To log HTTP related metrics and information, you can create slog.Attr with the following function.
@@ -46,7 +67,7 @@ The following fields needs to be set manually:
 Using these feature, you can log HTTP related information as follows,
 
 ```go
-p := slogdriver.NewHTTPPayload(req, res)
+p := slogdriver.NewHTkkTPPayload(req, res)
 p.Latency = time.Since(start)
 logger.Info("http finished", slogdriver.MakeHTTPAttrFromHTTPPayload(p))
 // Or, you can create attr manually
@@ -107,6 +128,14 @@ logger.Warn("Hello World", slogdriver.LabelKey, slog.String("label2", "fuga"))
 // {"severity":"WARNING","message":"Hello World","logging.googleapis.com/labels":{"commonLabel":"hoge","label2":"fuga"}}
 ```
 
+#### Source Location
+
+```go
+logger := slogdriver.New(os.Stdout, slogdriver.HandlerOptions{AddSource: true})
+logger.Info("Hello World")
+// {"severity":"INFO","message":"Hello World","logging.googleapis.com/sourceLocation":{"file":"/path/to/source.go","line":"12"}}
+```
+
 ## TODO
 
 - [x] severity
@@ -123,4 +152,4 @@ logger.Warn("Hello World", slogdriver.LabelKey, slog.String("label2", "fuga"))
 
 ## docs
 
-https://cloud.google.com/logging/docs/structured-logging?hl=ja#special-payload-fields
+https://cloud.google.com/logging/docs/structured-logging#special-payload-fields
