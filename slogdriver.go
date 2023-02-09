@@ -88,7 +88,7 @@ func (c *cloudLoggingHandler) Handle(r slog.Record) error {
 	attrs := make([]slog.Attr, 0, r.NumAttrs())
 	labelMerged := false
 	r.Attrs(func(a slog.Attr) {
-		if a.Key == LabelKey && a.Value.Kind() == slog.GroupKind {
+		if a.Key == LabelKey && a.Value.Kind() == slog.KindGroup {
 			// If a is label groups, merge it with c.labels.
 			newLabels := make([]slog.Attr, 0, len(a.Value.Group())+len(c.labels))
 			newLabels = append(newLabels, a.Value.Group()...)
@@ -119,7 +119,7 @@ func (c *cloudLoggingHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	var labels []slog.Attr
 	i := 0
 	for _, a := range attrs {
-		if a.Key == LabelKey && a.Value.Kind() == slog.GroupKind {
+		if a.Key == LabelKey && a.Value.Kind() == slog.KindGroup {
 			labels = a.Value.Group()
 			continue
 		}

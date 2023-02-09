@@ -133,7 +133,7 @@ logger.Warn("Hello World", slog.Group(slogdriver.LabelKey, slog.String("label2",
 ```go
 logger := slogdriver.New(os.Stdout, slogdriver.HandlerOptions{AddSource: true})
 logger.Info("Hello World")
-// {"severity":"INFO","message":"Hello World","logging.googleapis.com/sourceLocation":{"file":"/path/to/source.go","line":"12"}}
+// {"severity":"INFO","message":"Hello World","logging.googleapis.com/sourceLocation":{"file":"/path/to/source.go","line":"12","function":"yourFunction"}}
 ```
 
 ## TODO
