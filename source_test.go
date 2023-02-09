@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/kitagry/slogdriver"
@@ -37,5 +38,14 @@ func TestCloudLoggingHandler_HandleSourceLocatin(t *testing.T) {
 
 	if _, filename := filepath.Split(file.(string)); filename != "source_test.go" {
 		t.Errorf("filepath should be slogdriver_test.go, got %s", filename)
+	}
+
+	function, ok := sourceLocation["function"]
+	if !ok {
+		t.Fatalf("sourceLocation should have function attr, but got %v", sourceLocation)
+	}
+
+	if !strings.HasSuffix(function.(string), "TestCloudLoggingHandler_HandleSourceLocatin") {
+		t.Errorf("function should have TestCloudLoggingHandler_HandleSourceLocatin suffix, but got %s", function)
 	}
 }
