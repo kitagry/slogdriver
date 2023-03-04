@@ -1,22 +1,23 @@
 package slogdriver
 
 import (
+	"context"
 	"fmt"
 
 	"go.opencensus.io/trace"
 	"golang.org/x/exp/slog"
 )
 
-func (c *cloudLoggingHandler) handleTrace(r *slog.Record) {
+func (c *cloudLoggingHandler) handleTrace(ctx context.Context, r *slog.Record) {
 	if c.opts.ProjectID == "" {
 		return
 	}
 
-	if r.Context == nil {
+	if ctx == nil {
 		return
 	}
 
-	span := trace.FromContext(r.Context)
+	span := trace.FromContext(ctx)
 	if span == nil {
 		return
 	}

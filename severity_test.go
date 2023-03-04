@@ -2,6 +2,7 @@ package slogdriver_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"testing"
 
@@ -59,7 +60,7 @@ func TestSeverity(t *testing.T) {
 				Level: slogdriver.LevelDefault,
 			})
 
-			logger.Log(tt.severity, "msg")
+			logger.Log(context.Background(), tt.severity, "msg")
 
 			var got map[string]any
 			err := json.NewDecoder(&buf).Decode(&got)
