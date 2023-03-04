@@ -41,10 +41,9 @@ func main() {
 }
 
 func handler(w http.ResponseWriter, r *http.Request) {
-	logger = logger.WithContext(r.Context())
-	logger.Info("handle", slogdriver.MakeHTTPAttr(r, r.Response))
-	logger.Warn("hoge")
-	logger.Error("fuga", fmt.Errorf("error"))
+	logger.InfoCtx(r.Context(), "handle", slogdriver.MakeHTTPAttr(r, r.Response))
+	logger.WarnCtx(r.Context(), "hoge")
+	logger.ErrorCtx(r.Context(), "fuga", fmt.Errorf("error"))
 	_, _ = w.Write([]byte("OK"))
 }
 
