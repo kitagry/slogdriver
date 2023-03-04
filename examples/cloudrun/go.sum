@@ -685,6 +685,8 @@ github.com/kisielk/errcheck v1.5.0/go.mod h1:pFxgyoBC7bSaBwPgfKdkLd5X25qrDl4LWUI
 github.com/kisielk/gotool v1.0.0/go.mod h1:XhKaO+MFFWcvkIS/tQcRk01m1F5IRFswLeQ+oQHNcck=
 github.com/kitagry/slogdriver v0.0.0-20230101090416-434c0fb9520a h1:3PvNFk47igHWnvpSN19jFIptOc94EX8IvSR1f14oBOI=
 github.com/kitagry/slogdriver v0.0.0-20230101090416-434c0fb9520a/go.mod h1:FHXU43aGoIVuR8QTGLk6tMUVYh3GFg/BnUE/huVPHYY=
+github.com/kitagry/slogdriver v0.0.0-20230209023419-31a5f44437ce h1:NU2yBhO7a1o3en7fQ05uNlTu3kjZXGPfGPo0P4om0OU=
+github.com/kitagry/slogdriver v0.0.0-20230209023419-31a5f44437ce/go.mod h1:qOiXGW1v/sqxCVYgQLMDFBoGx8q3FHac6YvX6mjnkS0=
 github.com/klauspost/compress v1.11.3/go.mod h1:aoV0uJVorq1K+umq18yTdKaF57EivdYsUV+/s2qKfXs=
 github.com/klauspost/compress v1.11.13/go.mod h1:aoV0uJVorq1K+umq18yTdKaF57EivdYsUV+/s2qKfXs=
 github.com/klauspost/compress v1.13.6/go.mod h1:/3/Vjq9QcHkK5uEr5lBEmyoZ1iFhe47etQ6QUkpK6sk=
@@ -1125,6 +1127,8 @@ golang.org/x/exp v0.0.0-20200207192155-f17229e696bd/go.mod h1:J/WKrq2StrnmMY6+EH
 golang.org/x/exp v0.0.0-20200224162631-6cc2880d07d6/go.mod h1:3jZMyOhIsHpP37uCMkUooju7aAi5cS1Q23tOzKc+0MU=
 golang.org/x/exp v0.0.0-20221229233502-02c3fc3b3eb4 h1:FJ366zx98Mq6JL8dYkXwSHeGwc2wM9NsxFerYtY70rY=
 golang.org/x/exp v0.0.0-20221229233502-02c3fc3b3eb4/go.mod h1:CxIveKay+FTh1D0yPZemJVgC/95VzuuOLq5Qi4xnoYc=
+golang.org/x/exp v0.0.0-20230303215020-44a13b063f3e h1:S8xf0d0OEmWrClvbMiUSp+7cGD00txONylwExlf9wR0=
+golang.org/x/exp v0.0.0-20230303215020-44a13b063f3e/go.mod h1:CxIveKay+FTh1D0yPZemJVgC/95VzuuOLq5Qi4xnoYc=
 golang.org/x/image v0.0.0-20190227222117-0694c2d4d067/go.mod h1:kZ7UVZpmo3dzQBMxlp+ypCbDeSB+sBbTgSJuh5dn5js=
 golang.org/x/image v0.0.0-20190802002840-cff245a6509b/go.mod h1:FeLwcggjj3mMvU+oOTbSwawSJRM1uh48EjtB4UJZlP0=
 golang.org/x/lint v0.0.0-20181026193005-c67002cb31c3/go.mod h1:UVdnD1Gm6xHRNCYTkRU2/jEulfH38KcIWyp/GAMgvoE=
