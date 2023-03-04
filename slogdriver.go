@@ -1,6 +1,7 @@
 package slogdriver
 
 import (
+	"context"
 	"io"
 	"os"
 
@@ -83,8 +84,8 @@ func NewHandler(w io.Writer, opts HandlerOptions) slog.Handler {
 
 var _ slog.Handler = (*cloudLoggingHandler)(nil)
 
-func (c *cloudLoggingHandler) Handle(r slog.Record) error {
-	newRecord := slog.NewRecord(r.Time, r.Level, r.Message, 0, r.Context)
+func (c *cloudLoggingHandler) Handle(ctx context.Context, r slog.Record) error {
+	newRecord := slog.NewRecord(r.Time, r.Level, r.Message, 0)
 	attrs := make([]slog.Attr, 0, r.NumAttrs())
 	labelMerged := false
 	r.Attrs(func(a slog.Attr) {
@@ -110,9 +111,9 @@ func (c *cloudLoggingHandler) Handle(r slog.Record) error {
 		newRecord.AddAttrs(c.makeSourceLocationAttr(r))
 	}
 
-	c.handleTrace(&newRecord)
+	c.handleTrace(ctx, &newRecord)
 
-	return c.Handler.Handle(newRecord)
+	return c.Handler.Handle(ctx, newRecord)
 }
 
 func (c *cloudLoggingHandler) WithAttrs(attrs []slog.Attr) slog.Handler {

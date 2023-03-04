@@ -19,8 +19,7 @@ func TestCloudLoggingHandler_HandleTraceShouldHaveTraceKeys(t *testing.T) {
 	ctx, span := trace.StartSpan(context.Background(), "test-span")
 	defer span.End()
 
-	logger = logger.WithContext(ctx)
-	logger.Info("Hello World")
+	logger.InfoCtx(ctx, "Hello World")
 
 	var got map[string]any
 	err := json.NewDecoder(&buf).Decode(&got)
