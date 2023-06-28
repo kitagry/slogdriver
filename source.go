@@ -2,9 +2,8 @@ package slogdriver
 
 import (
 	"fmt"
+	"log/slog"
 	"runtime"
-
-	"golang.org/x/exp/slog"
 )
 
 type LogEntrySourceLocation struct {

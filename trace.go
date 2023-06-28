@@ -3,9 +3,9 @@ package slogdriver
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"go.opencensus.io/trace"
-	"golang.org/x/exp/slog"
 )
 
 func (c *cloudLoggingHandler) handleTrace(ctx context.Context, r *slog.Record) {

@@ -26,12 +26,11 @@
 package slogdriver
 
 import (
+	"log/slog"
 	"net"
 	"net/http"
 	"strconv"
 	"time"
-
-	"golang.org/x/exp/slog"
 )
 
 // HTTPPayload is the struct consists of http request related components.
