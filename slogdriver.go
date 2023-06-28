@@ -22,7 +22,7 @@ const (
 
 type cloudLoggingHandler struct {
 	slog.Handler
-	labels []slog.Attr
+	labels []any
 	opts   HandlerOptions
 }
 
@@ -76,8 +76,9 @@ func NewHandler(w io.Writer, opts HandlerOptions) slog.Handler {
 			return a
 		},
 	}
+
 	return &cloudLoggingHandler{
-		Handler: slogOpts.NewJSONHandler(w),
+		Handler: slog.NewJSONHandler(w, &slogOpts),
 		opts:    opts,
 	}
 }
@@ -88,18 +89,21 @@ func (c *cloudLoggingHandler) Handle(ctx context.Context, r slog.Record) error {
 	newRecord := slog.NewRecord(r.Time, r.Level, r.Message, 0)
 	attrs := make([]slog.Attr, 0, r.NumAttrs())
 	labelMerged := false
-	r.Attrs(func(a slog.Attr) {
+	r.Attrs(func(a slog.Attr) bool {
 		if a.Key == LabelKey && a.Value.Kind() == slog.KindGroup {
 			// If a is label groups, merge it with c.labels.
-			newLabels := make([]slog.Attr, 0, len(a.Value.Group())+len(c.labels))
-			newLabels = append(newLabels, a.Value.Group()...)
+			newLabels := make([]any, 0, len(a.Value.Group())+len(c.labels))
+			for _, attr := range a.Value.Group() {
+				newLabels = append(newLabels, attr)
+			}
 			newLabels = append(newLabels, c.labels...)
 			attr := slog.Group(LabelKey, newLabels...)
 			attrs = append(attrs, attr)
 			labelMerged = true
-			return
+			return true
 		}
 		attrs = append(attrs, a)
+		return true
 	})
 
 	newRecord.AddAttrs(attrs...)
@@ -117,11 +121,14 @@ func (c *cloudLoggingHandler) Handle(ctx context.Context, r slog.Record) error {
 }
 
 func (c *cloudLoggingHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
-	var labels []slog.Attr
+	var labels []any
 	i := 0
 	for _, a := range attrs {
 		if a.Key == LabelKey && a.Value.Kind() == slog.KindGroup {
-			labels = a.Value.Group()
+			labels = make([]any, len(a.Value.Group()))
+			for i, attr := range a.Value.Group() {
+				labels[i] = attr
+			}
 			continue
 		}
 		attrs[i] = a
@@ -137,11 +144,11 @@ func (c *cloudLoggingHandler) WithGroup(name string) slog.Handler {
 }
 
 func (c *cloudLoggingHandler) clone(handler slog.Handler) *cloudLoggingHandler {
-	labels := make([]slog.Attr, len(c.labels))
+	labels := make([]any, len(c.labels))
 	copy(labels, c.labels)
 	return c.cloneWithLabels(handler, labels)
 }
 
-func (c *cloudLoggingHandler) cloneWithLabels(handler slog.Handler, labels []slog.Attr) *cloudLoggingHandler {
+func (c *cloudLoggingHandler) cloneWithLabels(handler slog.Handler, labels []any) *cloudLoggingHandler {
 	return &cloudLoggingHandler{handler, labels, c.opts}
 }
