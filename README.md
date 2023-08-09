@@ -6,6 +6,10 @@
 
 This package provides simple structured logger optimized for [Cloud Logging](https://cloud.google.com/logging) based on [slog](https://github.com/golang/exp/tree/master/slog).
 
+## Requirements
+
+Go 1.21 or above
+
 ## Usage
 
 Initialize a logger.
