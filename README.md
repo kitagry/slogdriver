@@ -71,7 +71,7 @@ The following fields needs to be set manually:
 Using these feature, you can log HTTP related information as follows,
 
 ```go
-p := slogdriver.NewHTkkTPPayload(req, res)
+p := slogdriver.MakeHTTPPayload(req, res)
 p.Latency = time.Since(start)
 logger.Info("http finished", slogdriver.MakeHTTPAttrFromHTTPPayload(p))
 // Or, you can create attr manually
