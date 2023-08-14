@@ -3,9 +3,8 @@ package slogdriver
 import (
 	"context"
 	"io"
+	"log/slog"
 	"os"
-
-	"golang.org/x/exp/slog"
 )
 
 const (

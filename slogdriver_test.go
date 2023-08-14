@@ -1,10 +1,10 @@
 package slogdriver_test
 
 import (
+	"log/slog"
 	"os"
 
 	"github.com/kitagry/slogdriver"
-	"golang.org/x/exp/slog"
 )
 
 func ExampleNew() {

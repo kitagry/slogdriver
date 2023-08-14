@@ -4,10 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"log/slog"
 	"testing"
 
 	"github.com/kitagry/slogdriver"
-	"golang.org/x/exp/slog"
 )
 
 func TestSeverity(t *testing.T) {

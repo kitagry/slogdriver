@@ -2,11 +2,11 @@ package slogdriver_test
 
 import (
 	"io"
+	"log/slog"
 	"net/http"
 	"testing"
 
 	"github.com/kitagry/slogdriver"
-	"golang.org/x/exp/slog"
 )
 
 func TestMakeHTTPAttr(t *testing.T) {

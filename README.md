@@ -6,6 +6,10 @@
 
 This package provides simple structured logger optimized for [Cloud Logging](https://cloud.google.com/logging) based on [slog](https://github.com/golang/exp/tree/master/slog).
 
+## Requirements
+
+Go 1.21 or above
+
 ## Usage
 
 Initialize a logger.
@@ -85,7 +89,7 @@ logger := slogdriver.New(os.Stdout, slogdriver.HandlerOptions{ProjectID: "YOUR_P
 ctx, span := trace.StartSpan(context.Background(), "span")
 defer span.End()
 
-logger.InfoCtx(ctx, "Hello World")
+logger.InfoContext(ctx, "Hello World")
 // got:
 // {"severity":"INFO","message":"Hello World","logging.googleapis.com/trace":"projects/YOUR_PROJECT_ID/traces/00000000000000000000000000000000","logging.googleapis.com/spanId":"0000000000000000","logging.googleapis.com/trace_sampled":true}
 ```
@@ -100,7 +104,7 @@ import (
 
 handler := &ochttp.Handler{Propagation: &propagation.HTTPFormat{}}
 handler.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-	logger.InfoCtx(r.Context(), "Hello World") // This log should include trace information.
+	logger.InfoContext(r.Context(), "Hello World") // This log should include trace information.
 })
 ```
 

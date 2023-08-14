@@ -1,6 +1,6 @@
 package slogdriver
 
-import "golang.org/x/exp/slog"
+import "log/slog"
 
 const (
 	LevelDefault   slog.Level = slog.LevelDebug - 2
