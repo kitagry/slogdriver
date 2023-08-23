@@ -46,7 +46,7 @@ You can use slog.Level(Debug, Info, Warn, Error). And this library prepare [all 
 logger := slogdriver.New(os.Stdout, slogdriver.HandlerOptions{
   Level: slogdriver.LevelDefault,
 })
-logger.Log(slogdriver.LevelEmergency, "emergency msg")
+logger.Log(context.Background(), slogdriver.LevelEmergency, "emergency msg")
 ```
 
 #### HTTP request
