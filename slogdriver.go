@@ -67,6 +67,9 @@ func NewHandler(w io.Writer, opts HandlerOptions) slog.Handler {
 					Value: slog.StringValue(val),
 				}
 			case slog.MessageKey:
+				if a.Value.String() == "" {
+					return slog.Attr{}
+				}
 				return slog.Attr{
 					Key:   MessageKey,
 					Value: a.Value,
