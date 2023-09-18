@@ -81,12 +81,12 @@ logger.Info("http finished", slog.Any(slogdriver.HTTPKey, p))
 #### Trace context
 
 ```go
-import "go.opencensus.io/trace"
+import "go.opentelemetry.io/otel"
 
 // Set projectId or, you can set environment GOOGLE_CLOUD_PROJECT
 logger := slogdriver.New(os.Stdout, slogdriver.HandlerOptions{ProjectID: "YOUR_PROJECT_ID"})
 
-ctx, span := trace.StartSpan(context.Background(), "span")
+ctx, span := otel.Tracer(traceName).Start(context.Background(), "span")
 defer span.End()
 
 logger.InfoContext(ctx, "Hello World")
@@ -98,14 +98,22 @@ If you use [go.opencensus.io/trace](https://pkg.go.dev/go.opencensus.io/trace), 
 
 ```go
 import (
-	"contrib.go.opencensus.io/exporter/stackdriver/propagation"
-	"go.opencensus.io/plugin/ochttp"
+	gcppropagator "github.com/GoogleCloudPlatform/opentelemetry-operations-go/propagator"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel/propagation"
 )
 
-handler := &ochttp.Handler{Propagation: &propagation.HTTPFormat{}}
+otel.SetTextMapPropagator(
+    propagation.NewCompositeTextMapPropagator(
+        gcppropagator.CloudTraceOneWayPropagator{},
+        propagation.TraceContext{},
+    ),
+)
+handler := NewServeMux()
 handler.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 	logger.InfoContext(r.Context(), "Hello World") // This log should include trace information.
 })
+handler := otelhttp.NewHandler(handler, traceName)
 ```
 
 You can see [example for Cloud Run](./examples/cloudrun).
