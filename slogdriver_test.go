@@ -8,7 +8,13 @@ import (
 )
 
 func ExampleNew() {
-	logger := slogdriver.New(os.Stdout, slogdriver.HandlerOptions{AddSource: true})
-	logger = logger.With(slog.Group(slogdriver.LabelKey, slog.String("commonLabel", "hoge")))
-	logger.Info("Hello World", slog.Group(slogdriver.LabelKey, slog.String("specifiedLabel", "fuga")))
+	logger := slogdriver.New(
+		os.Stdout,
+		slogdriver.HandlerOptions{
+			AddSource:     true,
+			DefaultLabels: []slog.Attr{slog.String("defaultLabel", "hoge")},
+		},
+	)
+	logger = logger.With(slog.Group(slogdriver.LabelKey, slog.String("commonLabel", "fuga")))
+	logger.Info("Hello World", slog.Group(slogdriver.LabelKey, slog.String("specifiedLabel", "piyo")))
 }
