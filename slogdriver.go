@@ -42,6 +42,9 @@ type HandlerOptions struct {
 	// The handler calls Level.Level for each record processed;
 	// to adjust the minimum level dynamically, use a LevelVar.
 	Level slog.Leveler
+
+	// DefaultLabels is a set of default labels to be added to each log entry.
+	DefaultLabels []slog.Attr
 }
 
 func New(w io.Writer, opts HandlerOptions) *slog.Logger {
@@ -94,7 +97,10 @@ func (c *cloudLoggingHandler) Handle(ctx context.Context, r slog.Record) error {
 	r.Attrs(func(a slog.Attr) bool {
 		if a.Key == LabelKey && a.Value.Kind() == slog.KindGroup {
 			// If a is label groups, merge it with c.labels.
-			newLabels := make([]any, 0, len(a.Value.Group())+len(c.labels))
+			newLabels := make([]any, 0, len(a.Value.Group())+len(c.labels)+len(c.opts.DefaultLabels))
+			for _, l := range c.opts.DefaultLabels {
+				newLabels = append(newLabels, l)
+			}
 			for _, attr := range a.Value.Group() {
 				newLabels = append(newLabels, attr)
 			}
