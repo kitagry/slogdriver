@@ -1,28 +1,58 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"time"
 
-	"contrib.go.opencensus.io/exporter/stackdriver"
-	"contrib.go.opencensus.io/exporter/stackdriver/propagation"
+	texporter "github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/trace"
+	gcppropagator "github.com/GoogleCloudPlatform/opentelemetry-operations-go/propagator"
 	"github.com/kitagry/slogdriver"
-	"go.opencensus.io/plugin/ochttp"
-	"go.opencensus.io/trace"
+	"go.opentelemetry.io/contrib/detectors/gcp"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/sdk/resource"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
+
+const traceName = "slogdriver-sample"
 
 var logger = slogdriver.New(os.Stdout, slogdriver.HandlerOptions{
 	AddSource: true,
 	ProjectID: os.Getenv("GOOGLE_CLOUD_PROJECT"),
 })
 
-func init() {
-	initTrace()
-}
-
 func main() {
+	ctx := context.Background()
+	exporter, err := texporter.New(texporter.WithProjectID(os.Getenv("GOOGLE_CLOUD_PROJECT")))
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	res, err := resource.New(ctx, resource.WithDetectors(gcp.NewDetector()), resource.WithTelemetrySDK())
+	if err != nil {
+		logger.Log(ctx, slogdriver.LevelCritical, err.Error())
+	}
+
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithBatcher(exporter),
+		sdktrace.WithResource(res),
+	)
+	defer tp.Shutdown(ctx)
+
+	otel.SetTracerProvider(tp)
+
+	otel.SetTextMapPropagator(
+		propagation.NewCompositeTextMapPropagator(
+			gcppropagator.CloudTraceOneWayPropagator{},
+			propagation.TraceContext{},
+			propagation.Baggage{},
+		),
+	)
 	logger.Info("starting server...")
 
 	mux := http.NewServeMux()
@@ -41,24 +71,24 @@ func main() {
 }
 
 func handler(w http.ResponseWriter, r *http.Request) {
-	logger.InfoCtx(r.Context(), "handle", slogdriver.MakeHTTPAttr(r, r.Response))
-	logger.WarnCtx(r.Context(), "hoge")
-	logger.ErrorCtx(r.Context(), "fuga", fmt.Errorf("error"))
+	ctx, span := otel.Tracer(traceName).Start(r.Context(), "log handle")
+	logger.InfoContext(ctx, "log handle", slogdriver.MakeHTTPAttr(r, r.Response))
+	time.Sleep(100 * time.Millisecond)
+	span.End()
+
+	ctx, span = otel.Tracer(traceName).Start(r.Context(), "hoge")
+	logger.WarnContext(ctx, "hoge")
+	time.Sleep(100 * time.Millisecond)
+	span.End()
+
+	ctx, span = otel.Tracer(traceName).Start(r.Context(), "fuga")
+	logger.ErrorContext(ctx, "fuga", "error", fmt.Errorf("error msg"))
+	time.Sleep(100 * time.Millisecond)
+	span.End()
+
 	_, _ = w.Write([]byte("OK"))
 }
 
-// Cloud trace setting
-func initTrace() {
-	exporter, err := stackdriver.NewExporter(stackdriver.Options{
-		ProjectID:                os.Getenv("GOOGLE_CLOUD_PROJECT"),
-		TraceSpansBufferMaxBytes: 32 * 1024 * 1024,
-	})
-	if err != nil {
-		log.Fatal(err)
-	}
-	trace.RegisterExporter(exporter)
-}
-
 func withTrace(h http.Handler) http.Handler {
-	return &ochttp.Handler{Handler: h, Propagation: &propagation.HTTPFormat{}}
+	return otelhttp.NewHandler(h, traceName)
 }
