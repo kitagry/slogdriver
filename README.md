@@ -94,7 +94,7 @@ logger.InfoContext(ctx, "Hello World")
 // {"severity":"INFO","message":"Hello World","logging.googleapis.com/trace":"projects/YOUR_PROJECT_ID/traces/00000000000000000000000000000000","logging.googleapis.com/spanId":"0000000000000000","logging.googleapis.com/trace_sampled":true}
 ```
 
-If you use [go.opencensus.io/trace](https://pkg.go.dev/go.opencensus.io/trace), it is able to set traceId with request context like the below:
+If you use [go.opentelemetry.io/otel](https://pkg.go.dev/go.opentelemetry.io/otel), it is able to set traceId with request context like the below:
 
 ```go
 import (
