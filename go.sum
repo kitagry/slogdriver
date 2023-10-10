@@ -56,8 +56,8 @@ github.com/stretchr/testify v1.8.4 h1:CcVxjf3Q8PM0mHUKJCdn+eZZtm5yQwehR5yeSVQQcU
 github.com/stretchr/testify v1.8.4/go.mod h1:sz/lmYIOXD/1dqDmKjjqLyZ2RngseejIcXlSw2iwfAo=
 go.opencensus.io v0.24.0 h1:y73uSU6J157QMP2kn2r30vwW1A2W2WFwSCGnAVxeaD0=
 go.opencensus.io v0.24.0/go.mod h1:vNK8G9p7aAivkbmorf4v+7Hgx+Zs0yY+0fOtgBfjQKo=
-go.opentelemetry.io/contrib/detectors/gcp v1.19.0 h1:jQuVHQiHTnJa8JmZLe8ivKHZUh6x7pqC0DSGDG376II=
-go.opentelemetry.io/contrib/detectors/gcp v1.19.0/go.mod h1:0OKp3ML259QXdgA40Ij04gxOHosnWLHAIh/zAjG5mu4=
+go.opentelemetry.io/contrib/detectors/gcp v1.20.0 h1:0rMhJfnT4SWmQ6UYNDZMnKBqihtkwtDZKB/3sevhqdY=
+go.opentelemetry.io/contrib/detectors/gcp v1.20.0/go.mod h1:Cr5K1Vgz+OJ6W9h65pP72wiUV3Sd5LwY+ou2vTKYshk=
 go.opentelemetry.io/otel v1.19.0 h1:MuS/TNf4/j4IXsZuJegVzI1cwut7Qc00344rgH7p8bs=
 go.opentelemetry.io/otel v1.19.0/go.mod h1:i0QyjOq3UPoTzff0PJB2N66fb4S0+rSbSB15/oyH9fY=
 go.opentelemetry.io/otel/metric v1.19.0 h1:aTzpGtV0ar9wlV4Sna9sdJyII5jTVJEvKETPiOKwvpE=
