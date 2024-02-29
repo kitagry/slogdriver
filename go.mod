@@ -4,7 +4,7 @@ go 1.21
 
 require (
 	go.opencensus.io v0.24.0
-	go.opentelemetry.io/contrib/detectors/gcp v1.22.0
+	go.opentelemetry.io/contrib/detectors/gcp v1.24.0
 	go.opentelemetry.io/otel v1.24.0
 	go.opentelemetry.io/otel/sdk v1.24.0
 	go.opentelemetry.io/otel/trace v1.24.0
