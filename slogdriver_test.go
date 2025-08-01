@@ -32,8 +32,9 @@ func TestLabels(t *testing.T) {
 			DefaultLabels: []slog.Attr{slog.String("defaultLabel", "hoge")},
 		},
 	)
-	logger = logger.With(slog.Group(slogdriver.LabelKey, slog.String("commonLabel", "fuga")))
-	logger.Info("Hello World", slog.Group(slogdriver.LabelKey, slog.String("specifiedLabel", "piyo")))
+	logger = logger.With(slog.Group(slogdriver.LabelKey, slog.String("commonLabel1", "fuga")))
+	logger = logger.With(slog.Group(slogdriver.LabelKey, slog.String("commonLabel2", "piyo")))
+	logger.Info("Hello World", slog.Group(slogdriver.LabelKey, slog.String("specifiedLabel", "hogera")))
 
 	var result map[string]any
 	err := json.Unmarshal(buf.Bytes(), &result)
@@ -50,11 +51,15 @@ func TestLabels(t *testing.T) {
 		t.Errorf("unexpected defaultLabel: %s", labels["defaultLabel"])
 	}
 
-	if labels["commonLabel"] != "fuga" {
-		t.Errorf("unexpected commonLabel: %s", labels["commonLabel"])
+	if labels["commonLabel1"] != "fuga" {
+		t.Errorf("unexpected commonLabel1: %s", labels["commonLabel"])
 	}
 
-	if labels["specifiedLabel"] != "piyo" {
+	if labels["commonLabel2"] != "piyo" {
+		t.Errorf("unexpected commonLabel2: %s", labels["commonLabel2"])
+	}
+
+	if labels["specifiedLabel"] != "hogera" {
 		t.Errorf("unexpected specifiedLabel: %s", labels["specifiedLabel"])
 	}
 }
