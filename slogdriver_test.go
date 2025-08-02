@@ -63,3 +63,31 @@ func TestLabels(t *testing.T) {
 		t.Errorf("unexpected specifiedLabel: %s", labels["specifiedLabel"])
 	}
 }
+
+func TestShouldSetDefaultLabelsWithoutSpecifiedLabel(t *testing.T) {
+	var buf bytes.Buffer
+
+	logger := slogdriver.New(
+		&buf,
+		slogdriver.HandlerOptions{
+			AddSource:     true,
+			DefaultLabels: []slog.Attr{slog.String("defaultLabel", "hoge")},
+		},
+	)
+	logger.Info("Hello World")
+
+	var result map[string]any
+	err := json.Unmarshal(buf.Bytes(), &result)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	labels, ok := result[slogdriver.LabelKey].(map[string]any)
+	if !ok {
+		t.Fatalf("unexpected type: %T", result[slogdriver.LabelKey])
+	}
+
+	if labels["defaultLabel"] != "hoge" {
+		t.Errorf("unexpected defaultLabel: %s", labels["defaultLabel"])
+	}
+}

@@ -115,8 +115,13 @@ func (c *cloudLoggingHandler) Handle(ctx context.Context, r slog.Record) error {
 	})
 
 	newRecord.AddAttrs(attrs...)
-	if !labelMerged && len(c.labels) > 0 {
-		newRecord.AddAttrs(slog.Group(LabelKey, c.labels...))
+	if !labelMerged && len(c.opts.DefaultLabels)+len(c.labels) > 0 {
+		labels := make([]any, 0, len(c.opts.DefaultLabels)+len(c.labels))
+		for _, l := range c.opts.DefaultLabels {
+			labels = append(labels, l)
+		}
+		labels = append(labels, c.labels...)
+		newRecord.AddAttrs(slog.Group(LabelKey, labels...))
 	}
 
 	if c.opts.AddSource {
