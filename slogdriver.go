@@ -144,7 +144,9 @@ func (c *cloudLoggingHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	}
 	attrs = attrs[:i]
 	l := c.Handler.WithAttrs(attrs)
-	return c.cloneWithLabels(l, labels)
+	h := c.clone(l)
+	h.labels = append(h.labels, labels...)
+	return h
 }
 
 func (c *cloudLoggingHandler) WithGroup(name string) slog.Handler {
@@ -154,9 +156,5 @@ func (c *cloudLoggingHandler) WithGroup(name string) slog.Handler {
 func (c *cloudLoggingHandler) clone(handler slog.Handler) *cloudLoggingHandler {
 	labels := make([]any, len(c.labels))
 	copy(labels, c.labels)
-	return c.cloneWithLabels(handler, labels)
-}
-
-func (c *cloudLoggingHandler) cloneWithLabels(handler slog.Handler, labels []any) *cloudLoggingHandler {
 	return &cloudLoggingHandler{handler, labels, c.opts}
 }
