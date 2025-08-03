@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"maps"
 	"os"
 	"testing"
 
@@ -170,8 +171,9 @@ func TestGroup(t *testing.T) {
 		t.Error("source location key not found")
 	}
 
-	if result.Labels == nil {
-		t.Error("labels key not found")
+	expectedLabels := map[string]any{"label": "hoge"}
+	if !maps.Equal(result.Labels, expectedLabels) {
+		t.Errorf("labels should be %v got %v", expectedLabels, result.Labels)
 	}
 
 	if result.Trace == nil {
