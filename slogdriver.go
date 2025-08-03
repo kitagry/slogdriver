@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"slices"
 )
 
 const (
@@ -32,7 +33,7 @@ var knownKeys = map[string]struct{}{
 
 type cloudLoggingHandler struct {
 	slog.Handler
-	labels []any
+	labels []slog.Attr
 	groups []string
 	opts   HandlerOptions
 }
@@ -104,47 +105,35 @@ var _ slog.Handler = (*cloudLoggingHandler)(nil)
 
 func (c *cloudLoggingHandler) Handle(ctx context.Context, r slog.Record) error {
 	newRecord := slog.NewRecord(r.Time, r.Level, r.Message, 0)
-	attrs := make([]any, 0, r.NumAttrs())
-	var labels []any
+	labels := make([]slog.Attr, 0, len(c.opts.DefaultLabels)+len(c.labels))
+	labels = append(labels, c.opts.DefaultLabels...)
+	labels = append(labels, c.labels...)
 	knownAttrs := make([]slog.Attr, 0, len(knownKeys))
+	normalAttrs := make([]any, 0, r.NumAttrs())
 	r.Attrs(func(a slog.Attr) bool {
 		if a.Key == LabelKey && a.Value.Kind() == slog.KindGroup {
 			// If a is label groups, merge it with c.labels.
-			labels = make([]any, 0, len(a.Value.Group())+len(c.labels)+len(c.opts.DefaultLabels))
-			for _, l := range c.opts.DefaultLabels {
-				labels = append(labels, l)
-			}
-			for _, attr := range a.Value.Group() {
-				labels = append(labels, attr)
-			}
-			labels = append(labels, c.labels...)
+			labels = append(labels, a.Value.Group()...)
 			return true
 		}
-		if len(c.groups) > 0 {
-			if _, ok := knownKeys[a.Key]; ok {
-				knownAttrs = append(knownAttrs, a)
-				return true
-			}
+
+		if _, ok := knownKeys[a.Key]; ok {
+			knownAttrs = append(knownAttrs, a)
+			return true
 		}
-		attrs = append(attrs, a)
+
+		normalAttrs = append(normalAttrs, a)
 		return true
 	})
 
+	groupedAttr := slices.Clone(normalAttrs)
 	for i := len(c.groups) - 1; i >= 0; i-- {
-		attrs = []any{slog.Group(c.groups[i], attrs...)}
+		groupedAttr = []any{slog.Group(c.groups[i], groupedAttr...)}
 	}
+	newRecord.Add(groupedAttr...)
 
-	newRecord.Add(attrs...)
-
-	if len(labels) == 0 && len(c.opts.DefaultLabels)+len(c.labels) > 0 {
-		labels = make([]any, 0, len(c.opts.DefaultLabels)+len(c.labels))
-		for _, l := range c.opts.DefaultLabels {
-			labels = append(labels, l)
-		}
-		labels = append(labels, c.labels...)
-	}
 	if len(labels) > 0 {
-		newRecord.AddAttrs(slog.Group(LabelKey, labels...))
+		newRecord.AddAttrs(slog.Group(LabelKey, toAnySlice(labels)...))
 	}
 
 	if len(knownAttrs) > 0 {
@@ -161,11 +150,11 @@ func (c *cloudLoggingHandler) Handle(ctx context.Context, r slog.Record) error {
 }
 
 func (c *cloudLoggingHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
-	var labels []any
+	var labels []slog.Attr
 	i := 0
 	for _, a := range attrs {
 		if a.Key == LabelKey && a.Value.Kind() == slog.KindGroup {
-			labels = make([]any, len(a.Value.Group()))
+			labels = make([]slog.Attr, len(a.Value.Group()))
 			for i, attr := range a.Value.Group() {
 				labels[i] = attr
 			}
@@ -188,9 +177,15 @@ func (c *cloudLoggingHandler) WithGroup(name string) slog.Handler {
 }
 
 func (c *cloudLoggingHandler) clone(handler slog.Handler) *cloudLoggingHandler {
-	labels := make([]any, len(c.labels))
-	copy(labels, c.labels)
-	groups := make([]string, len(c.groups))
-	copy(groups, c.groups)
+	labels := slices.Clone(c.labels)
+	groups := slices.Clone(c.groups)
 	return &cloudLoggingHandler{handler, labels, groups, c.opts}
+}
+
+func toAnySlice[T any](tl []T) []any {
+	result := make([]any, len(tl))
+	for i, t := range tl {
+		result[i] = t
+	}
+	return result
 }
