@@ -19,9 +19,21 @@ const (
 	TraceSampledKey = "logging.googleapis.com/trace_sampled"
 )
 
+var knownKeys = map[string]struct{}{
+	MessageKey:        {},
+	SeverityKey:       {},
+	HTTPKey:           {},
+	SourceLocationKey: {},
+	LabelKey:          {},
+	TraceKey:          {},
+	SpanIDKey:         {},
+	TraceSampledKey:   {},
+}
+
 type cloudLoggingHandler struct {
 	slog.Handler
 	labels []any
+	groups []string
 	opts   HandlerOptions
 }
 
@@ -92,36 +104,51 @@ var _ slog.Handler = (*cloudLoggingHandler)(nil)
 
 func (c *cloudLoggingHandler) Handle(ctx context.Context, r slog.Record) error {
 	newRecord := slog.NewRecord(r.Time, r.Level, r.Message, 0)
-	attrs := make([]slog.Attr, 0, r.NumAttrs())
-	labelMerged := false
+	attrs := make([]any, 0, r.NumAttrs())
+	var labels []any
+	knownAttrs := make([]slog.Attr, 0, len(knownKeys))
 	r.Attrs(func(a slog.Attr) bool {
 		if a.Key == LabelKey && a.Value.Kind() == slog.KindGroup {
 			// If a is label groups, merge it with c.labels.
-			newLabels := make([]any, 0, len(a.Value.Group())+len(c.labels)+len(c.opts.DefaultLabels))
+			labels = make([]any, 0, len(a.Value.Group())+len(c.labels)+len(c.opts.DefaultLabels))
 			for _, l := range c.opts.DefaultLabels {
-				newLabels = append(newLabels, l)
+				labels = append(labels, l)
 			}
 			for _, attr := range a.Value.Group() {
-				newLabels = append(newLabels, attr)
+				labels = append(labels, attr)
 			}
-			newLabels = append(newLabels, c.labels...)
-			attr := slog.Group(LabelKey, newLabels...)
-			attrs = append(attrs, attr)
-			labelMerged = true
+			labels = append(labels, c.labels...)
 			return true
+		}
+		if len(c.groups) > 0 {
+			if _, ok := knownKeys[a.Key]; ok {
+				knownAttrs = append(knownAttrs, a)
+				return true
+			}
 		}
 		attrs = append(attrs, a)
 		return true
 	})
 
-	newRecord.AddAttrs(attrs...)
-	if !labelMerged && len(c.opts.DefaultLabels)+len(c.labels) > 0 {
-		labels := make([]any, 0, len(c.opts.DefaultLabels)+len(c.labels))
+	for i := len(c.groups) - 1; i >= 0; i-- {
+		attrs = []any{slog.Group(c.groups[i], attrs...)}
+	}
+
+	newRecord.Add(attrs...)
+
+	if len(labels) == 0 && len(c.opts.DefaultLabels)+len(c.labels) > 0 {
+		labels = make([]any, 0, len(c.opts.DefaultLabels)+len(c.labels))
 		for _, l := range c.opts.DefaultLabels {
 			labels = append(labels, l)
 		}
 		labels = append(labels, c.labels...)
+	}
+	if len(labels) > 0 {
 		newRecord.AddAttrs(slog.Group(LabelKey, labels...))
+	}
+
+	if len(knownAttrs) > 0 {
+		newRecord.AddAttrs(knownAttrs...)
 	}
 
 	if c.opts.AddSource {
@@ -155,11 +182,15 @@ func (c *cloudLoggingHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 }
 
 func (c *cloudLoggingHandler) WithGroup(name string) slog.Handler {
-	return c.clone(c.Handler.WithGroup(name))
+	h := c.clone(c.Handler)
+	h.groups = append(h.groups, name)
+	return h
 }
 
 func (c *cloudLoggingHandler) clone(handler slog.Handler) *cloudLoggingHandler {
 	labels := make([]any, len(c.labels))
 	copy(labels, c.labels)
-	return &cloudLoggingHandler{handler, labels, c.opts}
+	groups := make([]string, len(c.groups))
+	copy(groups, c.groups)
+	return &cloudLoggingHandler{handler, labels, groups, c.opts}
 }
