@@ -34,8 +34,13 @@ var knownKeys = map[string]struct{}{
 type cloudLoggingHandler struct {
 	slog.Handler
 	labels []slog.Attr
-	groups []string
+	groups []group
 	opts   HandlerOptions
+}
+
+type group struct {
+	name  string
+	attrs []any
 }
 
 type HandlerOptions struct {
@@ -127,8 +132,8 @@ func (c *cloudLoggingHandler) Handle(ctx context.Context, r slog.Record) error {
 	})
 
 	groupedAttr := slices.Clone(normalAttrs)
-	for i := len(c.groups) - 1; i >= 0; i-- {
-		groupedAttr = []any{slog.Group(c.groups[i], groupedAttr...)}
+	for _, group := range slices.Backward(c.groups) {
+		groupedAttr = []any{slog.Group(group.name, slices.Concat(group.attrs, groupedAttr)...)}
 	}
 	newRecord.Add(groupedAttr...)
 
@@ -152,6 +157,7 @@ func (c *cloudLoggingHandler) Handle(ctx context.Context, r slog.Record) error {
 func (c *cloudLoggingHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	var labels []slog.Attr
 	i := 0
+	groupAttrs := make([]any, 0, len(attrs))
 	for _, a := range attrs {
 		if a.Key == LabelKey && a.Value.Kind() == slog.KindGroup {
 			labels = make([]slog.Attr, len(a.Value.Group()))
@@ -160,6 +166,14 @@ func (c *cloudLoggingHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 			}
 			continue
 		}
+
+		if len(c.groups) > 0 {
+			if _, ok := knownKeys[a.Key]; !ok {
+				groupAttrs = append(groupAttrs, a)
+				continue
+			}
+		}
+
 		attrs[i] = a
 		i++
 	}
@@ -167,12 +181,17 @@ func (c *cloudLoggingHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	l := c.Handler.WithAttrs(attrs)
 	h := c.clone(l)
 	h.labels = append(h.labels, labels...)
+
+	if len(groupAttrs) > 0 {
+		h.groups[len(h.groups)-1].attrs = append(h.groups[len(h.groups)-1].attrs, groupAttrs...)
+	}
+
 	return h
 }
 
 func (c *cloudLoggingHandler) WithGroup(name string) slog.Handler {
 	h := c.clone(c.Handler)
-	h.groups = append(h.groups, name)
+	h.groups = append(h.groups, group{name: name})
 	return h
 }
 
