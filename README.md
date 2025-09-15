@@ -8,7 +8,7 @@ This package provides simple structured logger optimized for [Cloud Logging](htt
 
 ## Requirements
 
-Go 1.21 or above
+Go 1.23 or above
 
 ## Usage
 
