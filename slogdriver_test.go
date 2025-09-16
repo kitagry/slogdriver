@@ -124,7 +124,10 @@ func TestGroup(t *testing.T) {
 	ctx, span := tracer.Start(context.Background(), "test-span")
 	defer span.End()
 
-	logger = logger.WithGroup("group1").WithGroup("group2")
+	logger = logger.
+		With(slog.Bool("commonKey1", true)).
+		WithGroup("group1").With(slog.Int("commonKey2", 2)).
+		WithGroup("group2").With(slog.String("commonKey3", "piyo"))
 	logger.InfoContext(
 		ctx,
 		"Hello World",
@@ -137,10 +140,13 @@ func TestGroup(t *testing.T) {
 	type entry struct {
 		Group1 struct {
 			Group2 struct {
-				Key1 string `json:"key1"`
-				Key2 int    `json:"key2"`
+				Key1       string `json:"key1"`
+				Key2       int    `json:"key2"`
+				CommonKey3 string `json:"commonKey3"`
 			} `json:"group2"`
+			CommonKey2 int `json:"commonKey2"`
 		} `json:"group1"`
+		CommonKey1 bool `json:"commonKey1"`
 
 		HttpRequest  *slogdriver.HTTPPayload            `json:"httpRequest"`
 		Source       *slogdriver.LogEntrySourceLocation `json:"logging.googleapis.com/sourceLocation"`
@@ -161,6 +167,18 @@ func TestGroup(t *testing.T) {
 
 	if result.Group1.Group2.Key2 != 1 {
 		t.Errorf("unexpected group1.group2.key2: %d", result.Group1.Group2.Key2)
+	}
+
+	if !result.CommonKey1 {
+		t.Errorf("unexpected commonKey1: %v", result.CommonKey1)
+	}
+
+	if result.Group1.CommonKey2 != 2 {
+		t.Errorf("unexpected group1.commonKey2: %d", result.Group1.CommonKey2)
+	}
+
+	if result.Group1.Group2.CommonKey3 != "piyo" {
+		t.Errorf("unexpected group1.group2.commonKey3: %s", result.Group1.Group2.CommonKey3)
 	}
 
 	if result.HttpRequest == nil {
