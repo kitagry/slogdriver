@@ -39,18 +39,18 @@ import (
 type HTTPPayload struct {
 	RequestMethod                  string  `json:"requestMethod"`
 	RequestURL                     string  `json:"requestUrl"`
-	RequestSize                    string  `json:"requestSize"`
+	RequestSize                    string  `json:"requestSize,omitempty"`
 	Status                         int     `json:"status"`
-	ResponseSize                   string  `json:"responseSize"`
+	ResponseSize                   string  `json:"responseSize,omitempty"`
 	UserAgent                      string  `json:"userAgent"`
 	RemoteIP                       string  `json:"remoteIp"`
 	ServerIP                       string  `json:"serverIp"`
 	Referer                        string  `json:"referer"`
-	Latency                        Latency `json:"latency"`
+	Latency                        Latency `json:"latency,omitempty"`
 	CacheLookup                    bool    `json:"cacheLookup"`
 	CacheHit                       bool    `json:"cacheHit"`
 	CacheValidatedWithOriginServer bool    `json:"cacheValidatedWithOriginServer"`
-	CacheFillBytes                 string  `json:"cacheFillBytes"`
+	CacheFillBytes                 string  `json:"cacheFillBytes,omitempty"`
 	Protocol                       string  `json:"protocol"`
 }
 
