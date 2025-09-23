@@ -30,6 +30,7 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -118,7 +119,10 @@ func MakeLatency(d time.Duration, isGKE bool) Latency {
 
 // makeGKELatency returns Latency struct for GKE based on passed time.Duration object.
 func makeGKELatency(d time.Duration) Latency {
-	return d.Truncate(time.Millisecond).String() // need to Trucate by millis to show latency on Cloud Logging
+	str := strconv.FormatFloat(d.Seconds(), 'f', 9, 64)
+	str = strings.TrimRight(str, "0")
+	str = strings.TrimRight(str, ".")
+	return str + "s"
 }
 
 // makeGAELatency returns Latency struct for Cloud Run and GAE based on passed time.Duration object.
