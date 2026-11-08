@@ -82,6 +82,32 @@ logger.Info("http finished", slog.Any(slogdriver.HTTPKey, p))
 
 #### Trace context
 
+##### Without OpenTelemetry
+
+`slogdriver.Middleware` reads the `traceparent` or `X-Cloud-Trace-Context` header added by Cloud Run, GKE or Cloud Load Balancing, and puts the trace context into the request context.
+Logs written with the request context have trace, spanId and trace_sampled, so they are grouped with the request log in Cloud Logging.
+
+```go
+logger := slogdriver.New(os.Stdout, slogdriver.HandlerOptions{ProjectID: "YOUR_PROJECT_ID"})
+
+mux := http.NewServeMux()
+mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	logger.InfoContext(r.Context(), "Hello World")
+	// got:
+	// {"severity":"INFO","message":"Hello World","logging.googleapis.com/trace":"projects/YOUR_PROJECT_ID/traces/0af7651916cd43dd8448eb211c80319c","logging.googleapis.com/spanId":"b7ad6b7169203331","logging.googleapis.com/trace_sampled":true}
+})
+http.ListenAndServe(":8080", slogdriver.Middleware(mux))
+```
+
+- When both headers exist, `traceparent` is used. Invalid headers are ignored. `tracestate` is kept together with `traceparent`.
+- The span ID of `X-Cloud-Trace-Context` is a decimal number, so it is converted to 16 hex digits.
+- The trace context is stored as an OpenTelemetry remote span context (`trace.ContextWithRemoteSpanContext`), so `trace.SpanContextFromContext(r.Context())` also returns it.
+- If the request context already has a valid OpenTelemetry span or an OpenCensus span, the middleware does nothing. So, when you use it with `otelhttp`, the span created by `otelhttp` is used. If you put `slogdriver.Middleware` outside `otelhttp`, the span from the header becomes the parent of the `otelhttp` span (unless the propagator of `otelhttp` extracts another parent).
+
+If neither `ProjectID` nor `GOOGLE_CLOUD_PROJECT` is set, trace is written as the trace ID only (e.g. `"logging.googleapis.com/trace":"0af7651916cd43dd8448eb211c80319c"`), which Cloud Logging also accepts. You can still filter logs by the trace ID, but set `ProjectID` (or `GOOGLE_CLOUD_PROJECT`) to group them with the request log and link them to Cloud Trace, because the request log uses `projects/PROJECT_ID/traces/TRACE_ID`.
+
+##### With OpenTelemetry
+
 ```go
 import "go.opentelemetry.io/otel"
 

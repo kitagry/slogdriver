@@ -201,3 +201,19 @@ func TestCloudLoggingHandler_HandleTraceShouldPreferOpentelemetryOverOpencensus(
 		slogdriver.SpanIDKey: spanCtx.SpanID().String(),
 	})
 }
+
+func TestCloudLoggingHandler_HandleTraceShouldUseTraceIDOnlyWithoutProjectID(t *testing.T) {
+	t.Setenv("GOOGLE_CLOUD_PROJECT", "")
+
+	var buf bytes.Buffer
+	logger := slogdriver.New(&buf, slogdriver.HandlerOptions{})
+	ctx, spanCtx := newOtelContext(t)
+
+	logger.InfoContext(ctx, "Hello World")
+
+	assertTraceKeysOnce(t, buf.Bytes(), map[string]any{
+		slogdriver.TraceKey:        spanCtx.TraceID().String(),
+		slogdriver.SpanIDKey:       spanCtx.SpanID().String(),
+		slogdriver.TraceSampledKey: true,
+	})
+}
