@@ -53,7 +53,8 @@ type group struct {
 
 type HandlerOptions struct {
 	// ProjectId is Google Cloud Project ID
-	// If you want to use trace_id, you should set this or set GOOGLE_CLOUD_PROJECT environment.
+	// trace is written as "projects/PROJECT_ID/traces/TRACE_ID" when this or GOOGLE_CLOUD_PROJECT environment is set,
+	// otherwise it is written as the trace ID only.
 	// Cloud Shell and App Engine set this environment variable to the project ID, so use it if present.
 	ProjectID string
 

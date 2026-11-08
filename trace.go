@@ -13,10 +13,6 @@ import (
 // handleTrace adds trace attributes from ctx unless any of them is specified manually.
 // Filling only the missing keys would mix a manual trace with a spanId of another trace.
 func (c *cloudLoggingHandler) handleTrace(ctx context.Context, r *slog.Record, knownAttrs []slog.Attr) {
-	if c.opts.ProjectID == "" {
-		return
-	}
-
 	if ctx == nil {
 		return
 	}
@@ -55,8 +51,13 @@ func (c *cloudLoggingHandler) traceAttrsFromContext(ctx context.Context) []slog.
 }
 
 func (c *cloudLoggingHandler) makeTraceAttrs(traceID, spanID string, sampled bool) []slog.Attr {
+	trace := traceID
+	// Cloud Logging also accepts a bare trace ID, so trace is still written without the project ID.
+	if c.opts.ProjectID != "" {
+		trace = fmt.Sprintf("projects/%s/traces/%s", c.opts.ProjectID, traceID)
+	}
 	return []slog.Attr{
-		slog.String(TraceKey, fmt.Sprintf("projects/%s/traces/%s", c.opts.ProjectID, traceID)),
+		slog.String(TraceKey, trace),
 		slog.String(SpanIDKey, spanID),
 		slog.Bool(TraceSampledKey, sampled),
 	}
