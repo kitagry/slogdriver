@@ -3,6 +3,7 @@ package slogdriver_test
 import (
 	"bytes"
 	"encoding/json"
+	"log/slog"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -47,5 +48,38 @@ func TestCloudLoggingHandler_HandleSourceLocatin(t *testing.T) {
 
 	if !strings.HasSuffix(function.(string), "TestCloudLoggingHandler_HandleSourceLocatin") {
 		t.Errorf("function should have TestCloudLoggingHandler_HandleSourceLocatin suffix, but got %s", function)
+	}
+}
+
+func TestCloudLoggingHandler_HandleSourceLocationShouldPreferManualValue(t *testing.T) {
+	manual := slogdriver.LogEntrySourceLocation{File: "manual.go", Line: "1", Function: "manual"}
+	tests := map[string]func(*slog.Logger){
+		"log argument": func(l *slog.Logger) {
+			l.Info("m", slog.Any(slogdriver.SourceLocationKey, manual))
+		},
+		"with": func(l *slog.Logger) {
+			l.With(slog.Any(slogdriver.SourceLocationKey, manual)).Info("m")
+		},
+		"with under group": func(l *slog.Logger) {
+			l.WithGroup("g").With(slog.Any(slogdriver.SourceLocationKey, manual)).Info("m")
+		},
+	}
+	for name, logFn := range tests {
+		t.Run(name, func(t *testing.T) {
+			var buf bytes.Buffer
+			logFn(slogdriver.New(&buf, slogdriver.HandlerOptions{AddSource: true}))
+
+			n := bytes.Count(buf.Bytes(), []byte(`"`+slogdriver.SourceLocationKey+`":`))
+			if n != 1 {
+				t.Fatalf("sourceLocation should appear once, got %d: %s", n, buf.Bytes())
+			}
+			var got map[string]any
+			if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+				t.Fatal(err)
+			}
+			if loc, _ := got[slogdriver.SourceLocationKey].(map[string]any); loc["file"] != "manual.go" {
+				t.Errorf("sourceLocation should be the manual value, got %v", got[slogdriver.SourceLocationKey])
+			}
+		})
 	}
 }

@@ -20,6 +20,12 @@ func makeSourceLocationAttr(f runtime.Frame) slog.Attr {
 	})
 }
 
+// isSourceLocationAttr reports whether a is a manual source location, which is preferred to the one added by AddSource.
+// This lets a helper function log on behalf of its caller.
+func isSourceLocationAttr(a slog.Attr) bool {
+	return a.Key == SourceLocationKey
+}
+
 func recordFrame(r slog.Record) runtime.Frame {
 	fs := runtime.CallersFrames([]uintptr{r.PC})
 	f, _ := fs.Next()

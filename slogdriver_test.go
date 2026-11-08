@@ -8,6 +8,7 @@ import (
 	"maps"
 	"os"
 	"reflect"
+	"slices"
 	"testing"
 	"testing/slogtest"
 
@@ -507,6 +508,127 @@ func TestLabels_MapShouldBeMerged(t *testing.T) {
 			want := map[string]any{"d": "1", "m": "v"}
 			if labels, _ := got[slogdriver.LabelKey].(map[string]any); !maps.Equal(labels, want) {
 				t.Errorf("labels should be %v, got %v", want, got[slogdriver.LabelKey])
+			}
+		})
+	}
+}
+
+// topLevelKeys returns the top-level keys of a JSON object in order, keeping duplicates.
+func topLevelKeys(t *testing.T, out []byte) []string {
+	t.Helper()
+	dec := json.NewDecoder(bytes.NewReader(out))
+	if _, err := dec.Token(); err != nil {
+		t.Fatal(err)
+	}
+	var keys []string
+	for dec.More() {
+		tok, err := dec.Token()
+		if err != nil {
+			t.Fatal(err)
+		}
+		keys = append(keys, tok.(string))
+		var v json.RawMessage
+		if err := dec.Decode(&v); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return keys
+}
+
+func TestBuiltinKeys_UserAttrsShouldNotDuplicateSeverityAndMessage(t *testing.T) {
+	tests := map[string]struct {
+		logFn func(*slog.Logger)
+		want  map[string]any
+	}{
+		"log arguments": {
+			logFn: func(l *slog.Logger) {
+				l.Info("m", slog.String("severity", "X"), slog.String("message", "Y"))
+			},
+			want: map[string]any{"fields.severity": "X", "fields.message": "Y"},
+		},
+		"with": {
+			logFn: func(l *slog.Logger) {
+				l.With(slog.String("severity", "X"), slog.String("message", "Y")).Info("m")
+			},
+			want: map[string]any{"fields.severity": "X", "fields.message": "Y"},
+		},
+		"log arguments under group": {
+			logFn: func(l *slog.Logger) {
+				l.WithGroup("g").Info("m", slog.String("severity", "X"), slog.String("message", "Y"))
+			},
+			want: map[string]any{"g": map[string]any{"severity": "X", "message": "Y"}},
+		},
+		"with under group": {
+			logFn: func(l *slog.Logger) {
+				l.WithGroup("g").With(slog.String("severity", "X"), slog.String("message", "Y")).Info("m")
+			},
+			want: map[string]any{"g": map[string]any{"severity": "X", "message": "Y"}},
+		},
+		"msg in log arguments": {
+			logFn: func(l *slog.Logger) {
+				l.Info("m", slog.String(slog.MessageKey, "Y"))
+			},
+			want: map[string]any{slog.MessageKey: "Y"},
+		},
+		"msg in with": {
+			logFn: func(l *slog.Logger) {
+				l.With(slog.String(slog.MessageKey, "Y")).Info("m")
+			},
+			want: map[string]any{slog.MessageKey: "Y"},
+		},
+		"group values": {
+			logFn: func(l *slog.Logger) {
+				l.Info("m", slog.Group("severity", slog.String("a", "X")), slog.Group("message", slog.String("b", "Y")))
+			},
+			want: map[string]any{"fields.severity": map[string]any{"a": "X"}, "fields.message": map[string]any{"b": "Y"}},
+		},
+		"group values in with": {
+			logFn: func(l *slog.Logger) {
+				l.With(slog.Group("severity", slog.String("a", "X"))).Info("m")
+			},
+			want: map[string]any{"fields.severity": map[string]any{"a": "X"}},
+		},
+		"empty-key group": {
+			logFn: func(l *slog.Logger) {
+				l.Info("m", slog.Group("", slog.String("severity", "X"), slog.String(slog.MessageKey, "Y")))
+			},
+			want: map[string]any{"fields.severity": "X", slog.MessageKey: "Y"},
+		},
+		"level holding slog.Level": {
+			logFn: func(l *slog.Logger) {
+				l.Info("m", slog.Any(slog.LevelKey, slog.LevelWarn))
+			},
+			want: map[string]any{slog.LevelKey: "WARN"},
+		},
+		"group argument": {
+			logFn: func(l *slog.Logger) {
+				l.Info("m", slog.Group("g", slog.String("severity", "X"), slog.String("message", "Y")))
+			},
+			want: map[string]any{"g": map[string]any{"severity": "X", "message": "Y"}},
+		},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			var buf bytes.Buffer
+			tt.logFn(slogdriver.New(&buf, slogdriver.HandlerOptions{}))
+
+			keys := topLevelKeys(t, buf.Bytes())
+			for _, key := range []string{slogdriver.SeverityKey, slogdriver.MessageKey} {
+				if n := len(slices.DeleteFunc(slices.Clone(keys), func(k string) bool { return k != key })); n != 1 {
+					t.Errorf("key=%s should appear once at the top level, got %d: %s", key, n, buf.Bytes())
+				}
+			}
+			var got map[string]any
+			if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+				t.Fatal(err)
+			}
+			if got[slogdriver.SeverityKey] != "INFO" || got[slogdriver.MessageKey] != "m" {
+				t.Errorf("built-in severity and message should be kept, got %s", buf.Bytes())
+			}
+			for k, want := range tt.want {
+				if !reflect.DeepEqual(got[k], want) {
+					t.Errorf("key=%s expected %v, got %v", k, want, got[k])
+				}
 			}
 		})
 	}
