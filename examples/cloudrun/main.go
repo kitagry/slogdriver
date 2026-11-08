@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"time"
@@ -66,7 +67,7 @@ func main() {
 
 	logger.Info(fmt.Sprintf("listening on port %s", port))
 	if err := http.ListenAndServe(":"+port, withTrace(mux)); err != nil {
-		logger.Error("fail", err)
+		logger.Error("server stopped", slog.Any("error", err))
 	}
 }
 
