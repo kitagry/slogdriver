@@ -29,6 +29,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/netip"
 	"strconv"
 	"strings"
 	"time"
@@ -38,6 +39,8 @@ import (
 // Details are in following link.
 // https://cloud.google.com/logging/docs/reference/v2/rest/v2/LogEntry#HttpRequest
 type HTTPPayload struct {
+	// RequestMethod and RequestURL are always written because they are
+	// required for request logs.
 	RequestMethod                  string  `json:"requestMethod"`
 	RequestURL                     string  `json:"requestUrl"`
 	RequestSize                    string  `json:"requestSize,omitempty"`
@@ -142,8 +145,8 @@ func remoteIP(req *http.Request) string {
 	// X-Forwarded-For is "client, proxy1, proxy2", so the first one is the client.
 	if f := req.Header.Get("X-Forwarded-For"); f != "" {
 		client, _, _ := strings.Cut(f, ",")
-		if client = strings.TrimSpace(client); client != "" {
-			return client
+		if ip, ok := parseIP(strings.TrimSpace(client)); ok {
+			return ip
 		}
 	}
 
@@ -154,4 +157,16 @@ func remoteIP(req *http.Request) string {
 	}
 
 	return ip
+}
+
+// parseIP returns the IP of s, which may have a port.
+func parseIP(s string) (string, bool) {
+	if host, _, err := net.SplitHostPort(s); err == nil {
+		s = host
+	}
+	addr, err := netip.ParseAddr(s)
+	if err != nil {
+		return "", false
+	}
+	return addr.String(), true
 }

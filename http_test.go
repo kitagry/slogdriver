@@ -99,6 +99,26 @@ func TestMakeHTTPPayload_RemoteIP(t *testing.T) {
 			remoteAddr: "10.0.0.1:1234",
 			want:       "10.0.0.1",
 		},
+		"X-Forwarded-For with a port": {
+			xff:        "203.0.113.5:51234, 2.2.2.2",
+			remoteAddr: "10.0.0.1:1234",
+			want:       "203.0.113.5",
+		},
+		"X-Forwarded-For with IPv6": {
+			xff:        "2001:db8::1, 2.2.2.2",
+			remoteAddr: "10.0.0.1:1234",
+			want:       "2001:db8::1",
+		},
+		"X-Forwarded-For with bracketed IPv6 and a port": {
+			xff:        "[2001:db8::1]:443",
+			remoteAddr: "10.0.0.1:1234",
+			want:       "2001:db8::1",
+		},
+		"X-Forwarded-For that is not an IP falls back to RemoteAddr": {
+			xff:        "unknown, 2.2.2.2",
+			remoteAddr: "10.0.0.1:1234",
+			want:       "10.0.0.1",
+		},
 		"no X-Forwarded-For uses RemoteAddr": {
 			remoteAddr: "10.0.0.1:1234",
 			want:       "10.0.0.1",
