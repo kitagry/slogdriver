@@ -17,21 +17,17 @@ func (c *cloudLoggingHandler) handleTrace(ctx context.Context, r *slog.Record, k
 		return
 	}
 
-	if c.hasManualTraceKey(knownAttrs) {
+	if slices.ContainsFunc(knownAttrs, isTraceAttr) {
 		return
 	}
 
 	r.AddAttrs(c.traceAttrsFromContext(ctx)...)
 }
 
-func (c *cloudLoggingHandler) hasManualTraceKey(knownAttrs []slog.Attr) bool {
-	for _, key := range []string{TraceKey, SpanIDKey, TraceSampledKey} {
-		if _, ok := c.withKnownKeys[key]; ok {
-			return true
-		}
-		if slices.ContainsFunc(knownAttrs, func(a slog.Attr) bool { return a.Key == key }) {
-			return true
-		}
+func isTraceAttr(a slog.Attr) bool {
+	switch a.Key {
+	case TraceKey, SpanIDKey, TraceSampledKey:
+		return true
 	}
 	return false
 }

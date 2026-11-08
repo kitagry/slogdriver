@@ -147,6 +147,7 @@ handler := otelhttp.NewHandler(handler, traceName)
 You can see [example for Cloud Run](./examples/cloudrun).
 
 If you set any of `slogdriver.TraceKey`, `slogdriver.SpanIDKey` or `slogdriver.TraceSampledKey` manually (in log arguments or `With`), trace information from the context is not added, so that a manual trace is not mixed with a span of another trace.
+For the same reason, if the log arguments have any of these keys, all of them set by `With` are ignored.
 When both OpenTelemetry and OpenCensus spans are in the context, the OpenTelemetry span is used.
 
 #### Labels
@@ -169,6 +170,14 @@ logger.Warn("Hello World", slog.Group(slogdriver.LabelKey, slog.String("label2",
 // {"severity":"WARNING","message":"Hello World","logging.googleapis.com/labels":{"commonLabel":"hoge","label2":"fuga"}}
 ```
 
+The value of `slogdriver.LabelKey` must be a group, a map with string keys, or a `slog.LogValuer` resolved to one of them, because Cloud Logging labels are a map. Otherwise, it is written as an ordinary attribute with the key `!BADKEY`, as `log/slog` does for malformed attributes.
+
+```go
+logger.Info("Hello World", slog.String(slogdriver.LabelKey, "hoge"))
+// got:
+// {"severity":"INFO","message":"Hello World","!BADKEY":"hoge"}
+```
+
 #### InsertID and Operation
 
 `slogdriver.InsertIDKey` and `slogdriver.OperationKey` are always written at the top level, even under `WithGroup`.
@@ -180,6 +189,16 @@ logger.Info("Hello World",
 )
 // got:
 // {"severity":"INFO","message":"Hello World","logging.googleapis.com/insertId":"insert-id","logging.googleapis.com/operation":{"id":"operation-id","producer":"my-job"}}
+```
+
+#### Special keys passed via `With`
+
+When the same special key (`httpRequest`, `logging.googleapis.com/sourceLocation`, `logging.googleapis.com/insertId`, `logging.googleapis.com/operation`, `logging.googleapis.com/trace`, `logging.googleapis.com/spanId` or `logging.googleapis.com/trace_sampled`) is passed both via `With` and as a log argument, it is written once with the value of the log argument. When it is passed in several `With` calls, the last one is used.
+
+```go
+logger.With(slog.String(slogdriver.InsertIDKey, "with")).Info("Hello World", slog.String(slogdriver.InsertIDKey, "arg"))
+// got:
+// {"severity":"INFO","message":"Hello World","logging.googleapis.com/insertId":"arg"}
 ```
 
 #### Source Location
