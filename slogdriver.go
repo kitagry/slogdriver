@@ -4,10 +4,11 @@ import (
 	"context"
 	"io"
 	"log/slog"
-	"maps"
 	"os"
+	"reflect"
 	"runtime"
 	"slices"
+	"strings"
 )
 
 const (
@@ -30,7 +31,6 @@ var knownKeys = map[string]struct{}{
 	SeverityKey:       {},
 	HTTPKey:           {},
 	SourceLocationKey: {},
-	LabelKey:          {},
 	InsertIDKey:       {},
 	OperationKey:      {},
 	TraceKey:          {},
@@ -42,9 +42,10 @@ type cloudLoggingHandler struct {
 	slog.Handler
 	labels []slog.Attr
 	groups []group
-	// withKnownKeys holds known keys passed to WithAttrs, which are already written by Handler.
-	withKnownKeys map[string]struct{}
-	opts          HandlerOptions
+	// knownAttrs holds known keys passed to WithAttrs. They are written in Handle instead of by Handler,
+	// so that the log arguments can override them.
+	knownAttrs []slog.Attr
+	opts       HandlerOptions
 	// serviceContext is nil when Error Reporting is disabled.
 	serviceContext *serviceContext
 }
@@ -139,23 +140,21 @@ func (c *cloudLoggingHandler) Handle(ctx context.Context, r slog.Record) error {
 	labels := make([]slog.Attr, 0, len(c.opts.DefaultLabels)+len(c.labels))
 	labels = append(labels, c.opts.DefaultLabels...)
 	labels = append(labels, c.labels...)
-	knownAttrs := make([]slog.Attr, 0, len(knownKeys))
+	var argKnownAttrs []slog.Attr
 	normalAttrs := make([]any, 0, r.NumAttrs())
 	r.Attrs(func(a slog.Attr) bool {
-		if a.Key == LabelKey && a.Value.Kind() == slog.KindGroup {
-			// If a is label groups, merge it with c.labels.
+		a, kind := classifyAttr(a)
+		switch kind {
+		case labelAttr:
 			labels = append(labels, a.Value.Group()...)
-			return true
+		case knownAttr:
+			argKnownAttrs = append(argKnownAttrs, a)
+		default:
+			normalAttrs = append(normalAttrs, a)
 		}
-
-		if _, ok := knownKeys[a.Key]; ok {
-			knownAttrs = append(knownAttrs, a)
-			return true
-		}
-
-		normalAttrs = append(normalAttrs, a)
 		return true
 	})
+	knownAttrs := c.mergeKnownAttrs(argKnownAttrs)
 
 	groupedAttr := slices.Clone(normalAttrs)
 	for _, group := range slices.Backward(c.groups) {
@@ -191,45 +190,33 @@ func (c *cloudLoggingHandler) Handle(ctx context.Context, r slog.Record) error {
 }
 
 func (c *cloudLoggingHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
-	var labels []slog.Attr
-	var newKnownKeys []string
-	i := 0
-	groupAttrs := make([]any, 0, len(attrs))
+	var labels, knownAttrs []slog.Attr
+	normalAttrs := make([]slog.Attr, 0, len(attrs))
 	for _, a := range attrs {
-		if a.Key == LabelKey && a.Value.Kind() == slog.KindGroup {
+		a, kind := classifyAttr(a)
+		switch kind {
+		case labelAttr:
 			labels = append(labels, a.Value.Group()...)
-			continue
-		}
-
-		_, known := knownKeys[a.Key]
-		if len(c.groups) > 0 && !known {
-			groupAttrs = append(groupAttrs, a)
-			continue
-		}
-		if known {
-			newKnownKeys = append(newKnownKeys, a.Key)
-		}
-
-		attrs[i] = a
-		i++
-	}
-	attrs = attrs[:i]
-	l := c.Handler.WithAttrs(attrs)
-	h := c.clone(l)
-	if len(newKnownKeys) > 0 {
-		// clone shares withKnownKeys, so copy it before mutating.
-		h.withKnownKeys = maps.Clone(c.withKnownKeys)
-		if h.withKnownKeys == nil {
-			h.withKnownKeys = make(map[string]struct{}, len(newKnownKeys))
-		}
-		for _, k := range newKnownKeys {
-			h.withKnownKeys[k] = struct{}{}
+		case knownAttr:
+			knownAttrs = append(knownAttrs, a)
+		default:
+			normalAttrs = append(normalAttrs, a)
 		}
 	}
+
+	handler := c.Handler
+	if len(c.groups) == 0 && len(normalAttrs) > 0 {
+		handler = c.Handler.WithAttrs(normalAttrs)
+	}
+	h := c.clone(handler)
 	h.labels = append(h.labels, labels...)
-
-	if len(groupAttrs) > 0 {
-		h.groups[len(h.groups)-1].attrs = append(h.groups[len(h.groups)-1].attrs, groupAttrs...)
+	if len(knownAttrs) > 0 {
+		h.knownAttrs = uniqueByKey(slices.Concat(c.knownAttrs, knownAttrs))
+	}
+	if len(c.groups) > 0 && len(normalAttrs) > 0 {
+		// clone shares the backing array of attrs, so appending in place would overwrite a sibling's attrs.
+		last := &h.groups[len(h.groups)-1]
+		last.attrs = slices.Concat(last.attrs, toAnySlice(normalAttrs))
 	}
 
 	return h
@@ -246,7 +233,7 @@ func (c *cloudLoggingHandler) clone(handler slog.Handler) *cloudLoggingHandler {
 		Handler:        handler,
 		labels:         slices.Clone(c.labels),
 		groups:         slices.Clone(c.groups),
-		withKnownKeys:  c.withKnownKeys, // read-only; WithAttrs copies it before adding keys
+		knownAttrs:     c.knownAttrs, // read-only; WithAttrs replaces it with a new slice
 		opts:           c.opts,
 		serviceContext: c.serviceContext,
 	}
@@ -256,6 +243,85 @@ func toAnySlice[T any](tl []T) []any {
 	result := make([]any, len(tl))
 	for i, t := range tl {
 		result[i] = t
+	}
+	return result
+}
+
+type attrKind int
+
+const (
+	normalAttr attrKind = iota
+	labelAttr
+	knownAttr
+)
+
+// badKey is the key slog uses for malformed attributes.
+const badKey = "!BADKEY"
+
+// classifyAttr resolves the value of LabelKey, because a LogValuer may be resolved to a labels group.
+// It also resolves known keys, because those passed to WithAttrs are kept unformatted and must not be resolved on every log.
+func classifyAttr(a slog.Attr) (slog.Attr, attrKind) {
+	if a.Key == LabelKey {
+		a.Value = a.Value.Resolve()
+		if a.Value.Kind() == slog.KindGroup {
+			return a, labelAttr
+		}
+		if v, ok := mapToGroupValue(a.Value); ok {
+			a.Value = v
+			return a, labelAttr
+		}
+		// Cloud Logging labels must be a map, so a non-group value would be written as another labels key.
+		// Keep it as an ordinary attribute instead of dropping it.
+		a.Key = badKey
+		return a, normalAttr
+	}
+	if _, ok := knownKeys[a.Key]; ok {
+		a.Value = a.Value.Resolve()
+		return a, knownAttr
+	}
+	return a, normalAttr
+}
+
+// mapToGroupValue converts a map with string keys to a group sorted by key,
+// so that a map passed as labels is merged with other labels instead of being written as another labels key.
+func mapToGroupValue(v slog.Value) (slog.Value, bool) {
+	if v.Kind() != slog.KindAny {
+		return slog.Value{}, false
+	}
+	rv := reflect.ValueOf(v.Any())
+	if rv.Kind() != reflect.Map || rv.Type().Key().Kind() != reflect.String {
+		return slog.Value{}, false
+	}
+	attrs := make([]slog.Attr, 0, rv.Len())
+	for iter := rv.MapRange(); iter.Next(); {
+		attrs = append(attrs, slog.Any(iter.Key().String(), iter.Value().Interface()))
+	}
+	slices.SortFunc(attrs, func(a, b slog.Attr) int { return strings.Compare(a.Key, b.Key) })
+	return slog.GroupValue(attrs...), true
+}
+
+// mergeKnownAttrs merges the known keys passed to WithAttrs and the log arguments, preferring the log arguments.
+// Trace keys passed to WithAttrs are dropped as a whole if the log arguments have any of them, so as not to mix two traces.
+func (c *cloudLoggingHandler) mergeKnownAttrs(argAttrs []slog.Attr) []slog.Attr {
+	if len(argAttrs) == 0 {
+		// c.knownAttrs is already unique.
+		return c.knownAttrs
+	}
+	withAttrs := c.knownAttrs
+	if slices.ContainsFunc(argAttrs, isTraceAttr) {
+		withAttrs = slices.DeleteFunc(slices.Clone(withAttrs), isTraceAttr)
+	}
+	return uniqueByKey(slices.Concat(withAttrs, argAttrs))
+}
+
+// uniqueByKey keeps the last attr of each key in place, so callers must pass a slice they own.
+// It scans linearly instead of using a map, because it runs on every log with known keys and attrs has at most a few of them.
+func uniqueByKey(attrs []slog.Attr) []slog.Attr {
+	result := attrs[:0]
+	for i, a := range attrs {
+		if !slices.ContainsFunc(attrs[i+1:], func(b slog.Attr) bool { return b.Key == a.Key }) {
+			result = append(result, a)
+		}
 	}
 	return result
 }

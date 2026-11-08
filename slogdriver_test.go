@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"maps"
 	"os"
+	"reflect"
 	"testing"
 	"testing/slogtest"
 
@@ -283,5 +284,230 @@ func TestGroup_InsertIDAndOperationShouldBeTopLevel(t *testing.T) {
 	expectedOperation := map[string]any{"id": "op-id"}
 	if op, _ := result[slogdriver.OperationKey].(map[string]any); !maps.Equal(op, expectedOperation) {
 		t.Errorf("%s should be top-level %v, got %v", slogdriver.OperationKey, expectedOperation, result)
+	}
+}
+
+// assertKeyOnce counts the key in the raw output, because duplicated keys disappear when unmarshaled into a map.
+func assertKeyOnce(t *testing.T, out []byte, key string) map[string]any {
+	t.Helper()
+	if n := bytes.Count(out, []byte(`"`+key+`":`)); n != 1 {
+		t.Errorf("key=%s should appear once, got %d: %s", key, n, out)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatal(err)
+	}
+	return got
+}
+
+func TestKnownKeys_LogArgumentShouldOverrideWith(t *testing.T) {
+	tests := map[string]struct {
+		key       string
+		withValue any
+		argValue  any
+		want      any
+	}{
+		"insertId": {
+			key:       slogdriver.InsertIDKey,
+			withValue: "with",
+			argValue:  "arg",
+			want:      "arg",
+		},
+		"operation": {
+			key:       slogdriver.OperationKey,
+			withValue: map[string]string{"id": "with"},
+			argValue:  map[string]string{"id": "arg"},
+			want:      map[string]any{"id": "arg"},
+		},
+		"httpRequest": {
+			key:       slogdriver.HTTPKey,
+			withValue: slogdriver.HTTPPayload{RequestMethod: "GET"},
+			argValue:  slogdriver.HTTPPayload{RequestMethod: "POST"},
+			want:      "POST",
+		},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			var buf bytes.Buffer
+			logger := slogdriver.New(&buf, slogdriver.HandlerOptions{})
+
+			logger.With(slog.Any(tt.key, tt.withValue)).Info("Hello World", slog.Any(tt.key, tt.argValue))
+
+			got := assertKeyOnce(t, buf.Bytes(), tt.key)[tt.key]
+			if p, ok := got.(map[string]any); ok && tt.key == slogdriver.HTTPKey {
+				got = p["requestMethod"]
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("key=%s expected %v, got %v", tt.key, tt.want, got)
+			}
+		})
+	}
+}
+
+func TestKnownKeys_LaterWithShouldOverrideEarlierWith(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slogdriver.New(&buf, slogdriver.HandlerOptions{})
+
+	logger.With(slog.String(slogdriver.InsertIDKey, "first")).
+		WithGroup("g").
+		With(slog.String(slogdriver.InsertIDKey, "second")).
+		Info("Hello World")
+
+	if got := assertKeyOnce(t, buf.Bytes(), slogdriver.InsertIDKey)[slogdriver.InsertIDKey]; got != "second" {
+		t.Errorf("expected second, got %v", got)
+	}
+}
+
+func TestKnownKeys_WithShouldNotAffectParentLogger(t *testing.T) {
+	var buf bytes.Buffer
+	parent := slogdriver.New(&buf, slogdriver.HandlerOptions{}).With(slog.String(slogdriver.InsertIDKey, "parent"))
+	_ = parent.With(slog.String(slogdriver.InsertIDKey, "child"))
+
+	parent.Info("Hello World")
+
+	if got := assertKeyOnce(t, buf.Bytes(), slogdriver.InsertIDKey)[slogdriver.InsertIDKey]; got != "parent" {
+		t.Errorf("expected parent, got %v", got)
+	}
+}
+
+func TestLabels_NonGroupLabelKeyShouldNotDuplicateLabels(t *testing.T) {
+	tests := map[string]func(*slog.Logger){
+		"log argument": func(l *slog.Logger) {
+			l.Info("Hello World", slog.String(slogdriver.LabelKey, "x"))
+		},
+		"With": func(l *slog.Logger) {
+			l.With(slog.String(slogdriver.LabelKey, "x")).Info("Hello World")
+		},
+	}
+	for name, log := range tests {
+		t.Run(name, func(t *testing.T) {
+			var buf bytes.Buffer
+			log(slogdriver.New(&buf, slogdriver.HandlerOptions{
+				DefaultLabels: []slog.Attr{slog.String("d", "1")},
+			}))
+
+			got := assertKeyOnce(t, buf.Bytes(), slogdriver.LabelKey)
+			if labels, _ := got[slogdriver.LabelKey].(map[string]any); !maps.Equal(labels, map[string]any{"d": "1"}) {
+				t.Errorf("labels should be {d:1}, got %v", got[slogdriver.LabelKey])
+			}
+			// The value is kept as an ordinary attribute, like slog does for malformed attributes.
+			if got["!BADKEY"] != "x" {
+				t.Errorf("non-group label value should be kept in !BADKEY, got %v", got)
+			}
+		})
+	}
+}
+
+func TestLabels_NonGroupLabelKeyUnderGroupShouldBeInGroup(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slogdriver.New(&buf, slogdriver.HandlerOptions{})
+
+	logger.WithGroup("g").Info("Hello World", slog.String(slogdriver.LabelKey, "x"))
+
+	var got map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := got[slogdriver.LabelKey]; ok {
+		t.Errorf("labels should not be written: %s", buf.Bytes())
+	}
+	if g, _ := got["g"].(map[string]any); g["!BADKEY"] != "x" {
+		t.Errorf("non-group label value should be in g.!BADKEY, got %v", got)
+	}
+}
+
+type labelsValuer struct{}
+
+func (labelsValuer) LogValue() slog.Value {
+	return slog.GroupValue(slog.String("valuer", "v"))
+}
+
+func TestLabels_LogValuerResolvedToGroupShouldBeMerged(t *testing.T) {
+	tests := map[string]func(*slog.Logger){
+		"log argument": func(l *slog.Logger) {
+			l.Info("Hello World", slog.Any(slogdriver.LabelKey, labelsValuer{}))
+		},
+		"With": func(l *slog.Logger) {
+			l.With(slog.Any(slogdriver.LabelKey, labelsValuer{})).Info("Hello World")
+		},
+	}
+	for name, log := range tests {
+		t.Run(name, func(t *testing.T) {
+			var buf bytes.Buffer
+			log(slogdriver.New(&buf, slogdriver.HandlerOptions{
+				DefaultLabels: []slog.Attr{slog.String("d", "1")},
+			}))
+
+			got := assertKeyOnce(t, buf.Bytes(), slogdriver.LabelKey)
+			want := map[string]any{"d": "1", "valuer": "v"}
+			if labels, _ := got[slogdriver.LabelKey].(map[string]any); !maps.Equal(labels, want) {
+				t.Errorf("labels should be %v, got %v", want, got[slogdriver.LabelKey])
+			}
+		})
+	}
+}
+
+func TestGroup_SiblingWithShouldNotOverwriteEachOther(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slogdriver.New(&buf, slogdriver.HandlerOptions{})
+	// The second With grows the group attrs with spare capacity, which siblings must not share.
+	base := logger.WithGroup("g").With("a", 1, "b", 2).With("c", 3)
+	first := base.With("d", 4)
+	_ = base.With("e", 5)
+
+	first.Info("Hello World")
+
+	var got map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]any{"a": 1.0, "b": 2.0, "c": 3.0, "d": 4.0}
+	if g, _ := got["g"].(map[string]any); !maps.Equal(g, want) {
+		t.Errorf("g should be %v, got %v", want, got["g"])
+	}
+}
+
+type countingValuer struct{ n *int }
+
+func (v countingValuer) LogValue() slog.Value {
+	*v.n++
+	return slog.StringValue("resolved")
+}
+
+func TestKnownKeys_LogValuerInWithShouldBeResolvedOnce(t *testing.T) {
+	var buf bytes.Buffer
+	n := 0
+	logger := slogdriver.New(&buf, slogdriver.HandlerOptions{}).With(slog.Any(slogdriver.InsertIDKey, countingValuer{&n}))
+
+	logger.Info("first")
+	logger.Info("second")
+
+	if n != 1 {
+		t.Errorf("LogValue passed to With should be called once like other attrs, got %d", n)
+	}
+}
+
+func TestLabels_MapShouldBeMerged(t *testing.T) {
+	tests := map[string]func(*slog.Logger){
+		"map[string]string in log argument": func(l *slog.Logger) {
+			l.Info("Hello World", slog.Any(slogdriver.LabelKey, map[string]string{"m": "v"}))
+		},
+		"map[string]any in With": func(l *slog.Logger) {
+			l.With(slog.Any(slogdriver.LabelKey, map[string]any{"m": "v"})).Info("Hello World")
+		},
+	}
+	for name, log := range tests {
+		t.Run(name, func(t *testing.T) {
+			var buf bytes.Buffer
+			log(slogdriver.New(&buf, slogdriver.HandlerOptions{
+				DefaultLabels: []slog.Attr{slog.String("d", "1")},
+			}))
+
+			got := assertKeyOnce(t, buf.Bytes(), slogdriver.LabelKey)
+			want := map[string]any{"d": "1", "m": "v"}
+			if labels, _ := got[slogdriver.LabelKey].(map[string]any); !maps.Equal(labels, want) {
+				t.Errorf("labels should be %v, got %v", want, got[slogdriver.LabelKey])
+			}
+		})
 	}
 }
