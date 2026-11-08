@@ -2,6 +2,8 @@ module github.com/kitagry/slogdriver
 
 go 1.26.0
 
+toolchain go1.27.3
+
 require (
 	go.opencensus.io v0.24.0
 	go.opentelemetry.io/contrib/detectors/gcp v1.47.0
