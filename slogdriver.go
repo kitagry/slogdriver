@@ -12,7 +12,7 @@ import (
 )
 
 // builtinKeyPrefix is prepended to the key of a top-level user attribute named MessageKey or SeverityKey,
-// so that it does not duplicate the built-in one.
+// so that it does not duplicate the built-in one. See escapeTopLevelAttrs.
 const builtinKeyPrefix = "fields."
 
 const (
@@ -105,19 +105,19 @@ func NewHandler(w io.Writer, opts HandlerOptions) slog.Handler {
 			if len(groups) > 0 {
 				return a
 			}
+			// Top-level user level/msg attrs are marked by escapeTopLevelAttrs.
+			if v, ok := a.Value.Any().(userAttrValue); ok {
+				a.Value = v.Value
+				return a
+			}
 			switch a.Key {
 			case slog.LevelKey:
-				// User attrs may also use the "level" key, but only the built-in one holds a slog.Level.
 				level, ok := a.Value.Any().(slog.Level)
 				if !ok {
 					return a
 				}
 				return slog.String(SeverityKey, levelToSeverity(level))
 			case slog.MessageKey:
-				if v, ok := a.Value.Any().(userMessageValue); ok {
-					a.Value = v.Value
-					return a
-				}
 				if a.Value.String() == "" {
 					return slog.Attr{}
 				}
@@ -125,9 +125,6 @@ func NewHandler(w io.Writer, opts HandlerOptions) slog.Handler {
 					Key:   MessageKey,
 					Value: a.Value,
 				}
-			case SeverityKey, MessageKey:
-				// The built-in ones are converted from the level/msg attrs above, so these are user attrs.
-				a.Key = builtinKeyPrefix + a.Key
 			}
 			return a
 		},
@@ -168,7 +165,7 @@ func (c *cloudLoggingHandler) Handle(ctx context.Context, r slog.Record) error {
 	knownAttrs := c.mergeKnownAttrs(argKnownAttrs)
 
 	if len(c.groups) == 0 {
-		markUserMessageAttrs(normalAttrs)
+		escapeTopLevelAttrs(normalAttrs)
 	}
 	groupedAttr := toAnySlice(normalAttrs)
 	for _, group := range slices.Backward(c.groups) {
@@ -221,7 +218,7 @@ func (c *cloudLoggingHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 
 	handler := c.Handler
 	if len(c.groups) == 0 && len(normalAttrs) > 0 {
-		markUserMessageAttrs(normalAttrs)
+		escapeTopLevelAttrs(normalAttrs)
 		handler = c.Handler.WithAttrs(normalAttrs)
 	}
 	h := c.clone(handler)
@@ -255,19 +252,30 @@ func (c *cloudLoggingHandler) clone(handler slog.Handler) *cloudLoggingHandler {
 	}
 }
 
-// userMessageValue marks a top-level user attr named slog.MessageKey,
-// because ReplaceAttr cannot tell it from the built-in message, which is converted to MessageKey.
-type userMessageValue struct{ slog.Value }
+// userAttrValue marks a top-level user attr named slog.LevelKey or slog.MessageKey,
+// because ReplaceAttr cannot tell it from the built-in one, which is converted to SeverityKey or MessageKey.
+type userAttrValue struct{ slog.Value }
 
-// markUserMessageAttrs modifies attrs in place, so callers must pass a slice they own.
-func markUserMessageAttrs(attrs []slog.Attr) {
+// escapeTopLevelAttrs keeps top-level user attrs from duplicating the built-in severity and message.
+// It must be done before the attrs are passed to slog, because slog does not call ReplaceAttr for groups.
+// It modifies attrs in place, so callers must pass a slice they own.
+func escapeTopLevelAttrs(attrs []slog.Attr) {
 	for i, a := range attrs {
-		if a.Key != slog.MessageKey {
-			continue
-		}
-		// ReplaceAttr is not called for groups, so they are written as is.
-		if v := a.Value.Resolve(); v.Kind() != slog.KindGroup {
-			attrs[i].Value = slog.AnyValue(userMessageValue{v})
+		switch a.Key {
+		case SeverityKey, MessageKey:
+			attrs[i].Key = builtinKeyPrefix + a.Key
+		case slog.LevelKey, slog.MessageKey:
+			// Groups are written as is, because ReplaceAttr is not called for them.
+			if v := a.Value.Resolve(); v.Kind() != slog.KindGroup {
+				attrs[i].Value = slog.AnyValue(userAttrValue{v})
+			}
+		case "":
+			// slog inlines the attrs of a group with an empty key into the top level.
+			if v := a.Value.Resolve(); v.Kind() == slog.KindGroup {
+				group := slices.Clone(v.Group())
+				escapeTopLevelAttrs(group)
+				attrs[i].Value = slog.GroupValue(group...)
+			}
 		}
 	}
 }

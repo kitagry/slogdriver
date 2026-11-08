@@ -576,6 +576,30 @@ func TestBuiltinKeys_UserAttrsShouldNotDuplicateSeverityAndMessage(t *testing.T)
 			},
 			want: map[string]any{slog.MessageKey: "Y"},
 		},
+		"group values": {
+			logFn: func(l *slog.Logger) {
+				l.Info("m", slog.Group("severity", slog.String("a", "X")), slog.Group("message", slog.String("b", "Y")))
+			},
+			want: map[string]any{"fields.severity": map[string]any{"a": "X"}, "fields.message": map[string]any{"b": "Y"}},
+		},
+		"group values in with": {
+			logFn: func(l *slog.Logger) {
+				l.With(slog.Group("severity", slog.String("a", "X"))).Info("m")
+			},
+			want: map[string]any{"fields.severity": map[string]any{"a": "X"}},
+		},
+		"empty-key group": {
+			logFn: func(l *slog.Logger) {
+				l.Info("m", slog.Group("", slog.String("severity", "X"), slog.String(slog.MessageKey, "Y")))
+			},
+			want: map[string]any{"fields.severity": "X", slog.MessageKey: "Y"},
+		},
+		"level holding slog.Level": {
+			logFn: func(l *slog.Logger) {
+				l.Info("m", slog.Any(slog.LevelKey, slog.LevelWarn))
+			},
+			want: map[string]any{slog.LevelKey: "WARN"},
+		},
 		"group argument": {
 			logFn: func(l *slog.Logger) {
 				l.Info("m", slog.Group("g", slog.String("severity", "X"), slog.String("message", "Y")))
