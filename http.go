@@ -29,6 +29,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/netip"
 	"strconv"
 	"strings"
 	"time"
@@ -38,21 +39,23 @@ import (
 // Details are in following link.
 // https://cloud.google.com/logging/docs/reference/v2/rest/v2/LogEntry#HttpRequest
 type HTTPPayload struct {
+	// RequestMethod and RequestURL are always written because they are
+	// required for request logs.
 	RequestMethod                  string  `json:"requestMethod"`
 	RequestURL                     string  `json:"requestUrl"`
 	RequestSize                    string  `json:"requestSize,omitempty"`
-	Status                         int     `json:"status"`
+	Status                         int     `json:"status,omitempty"`
 	ResponseSize                   string  `json:"responseSize,omitempty"`
-	UserAgent                      string  `json:"userAgent"`
-	RemoteIP                       string  `json:"remoteIp"`
-	ServerIP                       string  `json:"serverIp"`
-	Referer                        string  `json:"referer"`
+	UserAgent                      string  `json:"userAgent,omitempty"`
+	RemoteIP                       string  `json:"remoteIp,omitempty"`
+	ServerIP                       string  `json:"serverIp,omitempty"`
+	Referer                        string  `json:"referer,omitempty"`
 	Latency                        Latency `json:"latency,omitempty"`
-	CacheLookup                    bool    `json:"cacheLookup"`
-	CacheHit                       bool    `json:"cacheHit"`
-	CacheValidatedWithOriginServer bool    `json:"cacheValidatedWithOriginServer"`
+	CacheLookup                    bool    `json:"cacheLookup,omitempty"`
+	CacheHit                       bool    `json:"cacheHit,omitempty"`
+	CacheValidatedWithOriginServer bool    `json:"cacheValidatedWithOriginServer,omitempty"`
 	CacheFillBytes                 string  `json:"cacheFillBytes,omitempty"`
-	Protocol                       string  `json:"protocol"`
+	Protocol                       string  `json:"protocol,omitempty"`
 }
 
 // Latency is the interface of the request processing latency on the server.
@@ -97,11 +100,12 @@ func MakeHTTPPayload(req *http.Request, res *http.Response) HTTPPayload {
 		payload.RequestURL = req.URL.String()
 	}
 
-	if req.Body != nil {
+	// ContentLength is -1 when the size is unknown.
+	if req.Body != nil && req.ContentLength >= 0 {
 		payload.RequestSize = strconv.FormatInt(req.ContentLength, 10)
 	}
 
-	if res.Body != nil {
+	if res.Body != nil && res.ContentLength >= 0 {
 		payload.ResponseSize = strconv.FormatInt(res.ContentLength, 10)
 	}
 
@@ -138,8 +142,12 @@ func makeGAELatency(d time.Duration) Latency {
 
 // remoteIP makes a best effort to compute the request client IP.
 func remoteIP(req *http.Request) string {
+	// X-Forwarded-For is "client, proxy1, proxy2", so the first one is the client.
 	if f := req.Header.Get("X-Forwarded-For"); f != "" {
-		return f
+		client, _, _ := strings.Cut(f, ",")
+		if ip, ok := parseIP(strings.TrimSpace(client)); ok {
+			return ip
+		}
 	}
 
 	f := req.RemoteAddr
@@ -149,4 +157,16 @@ func remoteIP(req *http.Request) string {
 	}
 
 	return ip
+}
+
+// parseIP returns the IP of s, which may have a port.
+func parseIP(s string) (string, bool) {
+	if host, _, err := net.SplitHostPort(s); err == nil {
+		s = host
+	}
+	addr, err := netip.ParseAddr(s)
+	if err != nil {
+		return "", false
+	}
+	return addr.String(), true
 }

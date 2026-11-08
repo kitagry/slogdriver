@@ -68,6 +68,8 @@ var res *http.Response
 logger.Info("Http Request finished", slogdriver.MakeHTTPAttr(req, res))
 ```
 
+`RemoteIP` is the first address of the `X-Forwarded-For` header (the client), or the host of `req.RemoteAddr` when the header is not set or its first entry is not an IP address. Note that the client can set any value in `X-Forwarded-For`, so do not trust `RemoteIP` for security purposes. `RequestSize` and `ResponseSize` are not set when `ContentLength` is unknown (`-1`). Fields with zero values (for example, `status: 0` or `cacheHit: false`) are omitted from the output, except `requestMethod` and `requestUrl`.
+
 The following fields needs to be set manually:
 
 - ServerIP
@@ -81,7 +83,7 @@ Using these feature, you can log HTTP related information as follows,
 
 ```go
 p := slogdriver.MakeHTTPPayload(req, res)
-p.Latency = time.Since(start)
+p.Latency = slogdriver.MakeLatency(time.Since(start), false) // true on GKE
 logger.Info("http finished", slogdriver.MakeHTTPAttrFromHTTPPayload(p))
 // Or, you can create attr manually
 logger.Info("http finished", slog.Any(slogdriver.HTTPKey, p))
