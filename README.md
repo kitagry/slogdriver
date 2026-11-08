@@ -187,6 +187,22 @@ logger.Info("Hello World", slog.String(slogdriver.LabelKey, "hoge"))
 // {"severity":"INFO","message":"Hello World","!BADKEY":"hoge"}
 ```
 
+Because Cloud Logging labels are `map<string,string>`, every label value is written as a string. This applies to `DefaultLabels`, `With` and log arguments alike.
+
+- Numbers and booleans are formatted as Go does (`1`, `1.5`, `true`), a `time.Duration` as `time.Duration.String` (`1.5s`), and a `time.Time` in RFC 3339 with nanoseconds (`2006-01-02T15:04:05.999999999Z07:00`). A value implementing `encoding.TextMarshaler` is written as its text and a `[]byte` as is, like `slog.TextHandler`. Other values are formatted with `fmt.Sprint`, and a `slog.LogValuer` is resolved first.
+- Nested groups and maps are flattened by joining the keys with `.`.
+- When the same key is given more than once, the last one wins: log arguments override `With`, a later `With` overrides an earlier one, and `With` overrides `DefaultLabels`. A nested key such as `a.b` is the same key as the flattened one.
+- Labels in `DefaultLabels` and `With` are converted once, so a `slog.LogValuer` in them is resolved only once.
+
+```go
+logger.Info("Hello World", slog.Group(slogdriver.LabelKey,
+	slog.Int("count", 1),
+	slog.Group("user", slog.Bool("admin", true)),
+))
+// got:
+// {"severity":"INFO","message":"Hello World","logging.googleapis.com/labels":{"count":"1","user.admin":"true"}}
+```
+
 #### InsertID and Operation
 
 `slogdriver.InsertIDKey` and `slogdriver.OperationKey` are always written at the top level, even under `WithGroup`.
