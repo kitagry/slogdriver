@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	texporter "github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/trace"
@@ -66,14 +67,14 @@ func main() {
 	}
 
 	logger.Info(fmt.Sprintf("listening on port %s", port))
-	if err := http.ListenAndServe(":"+port, withTrace(mux)); err != nil {
+	if err := http.ListenAndServe(":"+port, withTrace(withRequestLog(mux))); err != nil {
 		logger.Error("server stopped", slog.Any("error", err))
 	}
 }
 
 func handler(w http.ResponseWriter, r *http.Request) {
 	ctx, span := otel.Tracer(traceName).Start(r.Context(), "log handle")
-	logger.InfoContext(ctx, "log handle", slogdriver.MakeHTTPAttr(r, r.Response))
+	logger.InfoContext(ctx, "log handle")
 	time.Sleep(100 * time.Millisecond)
 	span.End()
 
@@ -92,4 +93,58 @@ func handler(w http.ResponseWriter, r *http.Request) {
 
 func withTrace(h http.Handler) http.Handler {
 	return otelhttp.NewHandler(h, traceName)
+}
+
+// withRequestLog logs the request with httpRequest after h has written the response.
+// It must run inside withTrace so that the log has the trace of the request.
+func withRequestLog(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		rec := &responseRecorder{ResponseWriter: w}
+		h.ServeHTTP(rec, r)
+
+		// r.Response is always nil on the server side, so the response fields come from rec.
+		p := slogdriver.MakeHTTPPayload(r, nil)
+		p.Status = rec.statusCode()
+		p.ResponseSize = strconv.FormatInt(rec.size, 10)
+		p.Latency = slogdriver.MakeLatency(time.Since(start), false) // true on GKE
+		logger.InfoContext(r.Context(), "request finished", slogdriver.MakeHTTPAttrFromHTTPPayload(p))
+	})
+}
+
+// responseRecorder records the status code and the number of bytes written to the response.
+type responseRecorder struct {
+	http.ResponseWriter
+	status int
+	size   int64
+}
+
+func (rec *responseRecorder) WriteHeader(code int) {
+	// 1xx responses are followed by the final response, so they are not recorded.
+	if rec.status == 0 && code >= 200 {
+		rec.status = code
+	}
+	rec.ResponseWriter.WriteHeader(code)
+}
+
+func (rec *responseRecorder) Write(b []byte) (int, error) {
+	if rec.status == 0 {
+		rec.status = http.StatusOK
+	}
+	n, err := rec.ResponseWriter.Write(b)
+	rec.size += int64(n)
+	return n, err
+}
+
+// Unwrap lets http.ResponseController reach the underlying ResponseWriter (e.g. for Flush).
+func (rec *responseRecorder) Unwrap() http.ResponseWriter {
+	return rec.ResponseWriter
+}
+
+func (rec *responseRecorder) statusCode() int {
+	// net/http sends 200 when the handler writes nothing.
+	if rec.status == 0 {
+		return http.StatusOK
+	}
+	return rec.status
 }
