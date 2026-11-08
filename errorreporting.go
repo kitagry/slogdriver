@@ -63,7 +63,7 @@ func (c *cloudLoggingHandler) errorReportingAttrs(r slog.Record, f runtime.Frame
 		FunctionName: f.Function,
 	})))
 	if stack := stackFrom(r.PC); stack != "" {
-		if summary := errorSummary(r); summary != "" {
+		if summary := c.errorSummary(r); summary != "" {
 			stack = summary + "\n\n" + stack
 		}
 		attrs = append(attrs, slog.String("stack_trace", stack))
@@ -72,22 +72,48 @@ func (c *cloudLoggingHandler) errorReportingAttrs(r slog.Record, f runtime.Frame
 }
 
 // errorSummary returns the first line of stack_trace, which Error Reporting shows as the error message.
-func errorSummary(r slog.Record) string {
+// The message and the error are passed to ReplaceAttr, so that a value masked or removed by it does not leak here.
+func (c *cloudLoggingHandler) errorSummary(r slog.Record) string {
+	msg := r.Message
+	if msg != "" && c.opts.ReplaceAttr != nil {
+		msg = ""
+		if a := c.opts.ReplaceAttr(nil, slog.String(MessageKey, r.Message)); a.Key != "" {
+			msg = a.Value.Resolve().String()
+		}
+	}
 	var errMsg string
 	r.Attrs(func(a slog.Attr) bool {
-		if err, ok := a.Value.Resolve().Any().(error); ok {
-			errMsg = errorString(err)
-			return false
+		a.Value = a.Value.Resolve()
+		if _, ok := a.Value.Any().(error); !ok {
+			return true
 		}
-		return true
+		if c.opts.ReplaceAttr != nil {
+			if len(c.groups) == 0 {
+				// Pass the key that Handle writes, e.g. "fields.message", so that ReplaceAttr sees the same attr as in the output.
+				attrs := []slog.Attr{a}
+				escapeTopLevelAttrs(attrs)
+				a = replaceBuiltinAttr(nil, attrs[0])
+			}
+			a = c.opts.ReplaceAttr(c.groupNames(), a)
+			if a.Key == "" {
+				return true
+			}
+			a.Value = a.Value.Resolve()
+		}
+		if err, ok := a.Value.Any().(error); ok {
+			errMsg = errorString(err)
+		} else {
+			errMsg = a.Value.String()
+		}
+		return false
 	})
 	switch {
 	case errMsg == "":
-		return r.Message
-	case r.Message == "":
+		return msg
+	case msg == "":
 		return errMsg
 	default:
-		return r.Message + ": " + errMsg
+		return msg + ": " + errMsg
 	}
 }
 
