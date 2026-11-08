@@ -91,6 +91,19 @@ type HandlerOptions struct {
 	// ErrorReporting makes logs at slog.LevelError or above reported to Cloud Error Reporting.
 	// If nil, logs are written as before.
 	ErrorReporting *ErrorReportingOptions
+
+	// ReplaceAttr is called to rewrite each non-group attribute before it is logged, like slog.HandlerOptions.ReplaceAttr.
+	// It is called after slogdriver has converted the attribute, so it receives SeverityKey and MessageKey instead of
+	// slog.LevelKey and slog.MessageKey, and the label values as strings. If the returned attribute has an empty key,
+	// it is removed.
+	//
+	// The special keys of Cloud Logging, such as SeverityKey, MessageKey, HTTPKey, TraceKey, SourceLocationKey and
+	// the Error Reporting fields, are passed with no groups even under WithGroup, because they are written at the top level.
+	// Each label is passed with the groups []string{LabelKey}.
+	//
+	// ReplaceAttr is also applied to the message and the first error attribute of an error log
+	// to build the first line of stack_trace, so it may be called more than once for them.
+	ReplaceAttr func(groups []string, a slog.Attr) slog.Attr
 }
 
 func New(w io.Writer, opts HandlerOptions) *slog.Logger {
@@ -108,32 +121,11 @@ func NewHandler(w io.Writer, opts HandlerOptions) slog.Handler {
 		AddSource: false,
 		Level:     opts.Level,
 		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
-			// Built-in level/message attrs are always top-level; nested ones are user attrs.
-			if len(groups) > 0 {
+			a = replaceBuiltinAttr(groups, a)
+			if opts.ReplaceAttr == nil || a.Key == "" {
 				return a
 			}
-			// Top-level user level/msg attrs are marked by escapeTopLevelAttrs.
-			if v, ok := a.Value.Any().(userAttrValue); ok {
-				a.Value = v.Value
-				return a
-			}
-			switch a.Key {
-			case slog.LevelKey:
-				level, ok := a.Value.Any().(slog.Level)
-				if !ok {
-					return a
-				}
-				return slog.String(SeverityKey, levelToSeverity(level))
-			case slog.MessageKey:
-				if a.Value.String() == "" {
-					return slog.Attr{}
-				}
-				return slog.Attr{
-					Key:   MessageKey,
-					Value: a.Value,
-				}
-			}
-			return a
+			return opts.ReplaceAttr(groups, a)
 		},
 	}
 
@@ -147,6 +139,36 @@ func NewHandler(w io.Writer, opts HandlerOptions) slog.Handler {
 		h.serviceContext = &sc
 	}
 	return h
+}
+
+// replaceBuiltinAttr converts the built-in level and message attrs of slog to those of Cloud Logging.
+func replaceBuiltinAttr(groups []string, a slog.Attr) slog.Attr {
+	// Built-in level/message attrs are always top-level; nested ones are user attrs.
+	if len(groups) > 0 {
+		return a
+	}
+	// Top-level user level/msg attrs are marked by escapeTopLevelAttrs.
+	if v, ok := a.Value.Any().(userAttrValue); ok {
+		a.Value = v.Value
+		return a
+	}
+	switch a.Key {
+	case slog.LevelKey:
+		level, ok := a.Value.Any().(slog.Level)
+		if !ok {
+			return a
+		}
+		return slog.String(SeverityKey, levelToSeverity(level))
+	case slog.MessageKey:
+		if a.Value.String() == "" {
+			return slog.Attr{}
+		}
+		return slog.Attr{
+			Key:   MessageKey,
+			Value: a.Value,
+		}
+	}
+	return a
 }
 
 var _ slog.Handler = (*cloudLoggingHandler)(nil)
@@ -250,6 +272,15 @@ func (c *cloudLoggingHandler) WithGroup(name string) slog.Handler {
 	h := c.clone(c.Handler)
 	h.groups = append(h.groups, group{name: name})
 	return h
+}
+
+// groupNames returns the groups passed to ReplaceAttr for the attrs of a record.
+func (c *cloudLoggingHandler) groupNames() []string {
+	names := make([]string, len(c.groups))
+	for i, g := range c.groups {
+		names[i] = g.name
+	}
+	return names
 }
 
 func (c *cloudLoggingHandler) clone(handler slog.Handler) *cloudLoggingHandler {

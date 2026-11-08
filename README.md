@@ -275,6 +275,51 @@ logger.Error("failed to save user", slog.Any("error", err))
 - When the record is handled in another goroutine than the log call (e.g. an asynchronous handler wraps slogdriver), `stack_trace` is omitted and only `context.reportLocation` is written.
 - Do not use `@type`, `serviceContext`, `context` or `stack_trace` as top-level keys of your own attributes for error logs, because they would be written twice.
 
+### ReplaceAttr
+
+`ReplaceAttr` rewrites or removes attributes before they are written, like [`slog.HandlerOptions.ReplaceAttr`](https://pkg.go.dev/log/slog#HandlerOptions). It is useful to mask secrets or to rename keys. If the returned attribute has an empty key, the attribute is removed.
+
+```go
+logger := slogdriver.New(os.Stdout, slogdriver.HandlerOptions{
+	ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+		if a.Key == "password" {
+			return slog.String(a.Key, "***")
+		}
+		return a
+	},
+})
+logger.WithGroup("user").Info("login", slog.String("name", "alice"), slog.String("password", "secret"))
+// got:
+// {"severity":"INFO","message":"login","user":{"name":"alice","password":"***"}}
+```
+
+`ReplaceAttr` is called after slogdriver has converted the attributes to the Cloud Logging format, so the special fields are passed to it too, and you can change or remove them:
+
+- `groups` has the names of `WithGroup` and `slog.Group`, as in `log/slog`.
+- The built-in attributes are passed as `time`, `severity` (e.g. `"WARNING"`) and `message`, instead of `level` and `msg`. An empty message is not written, and is not passed to `ReplaceAttr`.
+- The special keys (`httpRequest`, `logging.googleapis.com/sourceLocation`, `logging.googleapis.com/insertId`, `logging.googleapis.com/trace`, `logging.googleapis.com/spanId`, `logging.googleapis.com/trace_sampled`) and the Error Reporting fields (`@type`, `serviceContext`, `stack_trace`) are passed with no groups, even under `WithGroup`, because they are written at the top level. As in `log/slog`, `ReplaceAttr` is not called for a group itself but for the attributes in it, e.g. `reportLocation` with the groups `["context"]` and the fields of `logging.googleapis.com/operation` with the groups `["logging.googleapis.com/operation"]`.
+- Each label is passed with the groups `["logging.googleapis.com/labels"]`, after it is converted to a string. Return a string value to keep the labels `map<string,string>`. If all labels are removed, `logging.googleapis.com/labels` is omitted.
+- For an error log with `ErrorReporting`, the message and the first `error` value are also passed to `ReplaceAttr` to build the first line of `stack_trace`, so that a masked or removed value does not appear there. `ReplaceAttr` may therefore be called more than once for them.
+- Renaming a key does not move the attribute: an attribute renamed to a special key under `WithGroup` stays in the group, and an attribute renamed to an existing key is written twice, as in `log/slog`.
+
+```go
+logger := slogdriver.New(os.Stdout, slogdriver.HandlerOptions{
+	ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+		switch {
+		case len(groups) == 0 && a.Key == slog.TimeKey:
+			// Cloud Logging uses the time it receives the log.
+			return slog.Attr{}
+		case slices.Equal(groups, []string{slogdriver.LabelKey}) && a.Key == "token":
+			return slog.String(a.Key, "***")
+		}
+		return a
+	},
+})
+logger.Info("Hello World", slog.Group(slogdriver.LabelKey, slog.String("token", "secret")))
+// got:
+// {"severity":"INFO","message":"Hello World","logging.googleapis.com/labels":{"token":"***"}}
+```
+
 ## TODO
 
 - [x] severity
