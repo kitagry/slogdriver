@@ -4,12 +4,15 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"slices"
 
 	opencensusTrace "go.opencensus.io/trace"
 	opentelemetryTrace "go.opentelemetry.io/otel/trace"
 )
 
-func (c *cloudLoggingHandler) handleTrace(ctx context.Context, r *slog.Record) {
+// handleTrace adds trace attributes from ctx unless any of them is specified manually.
+// Filling only the missing keys would mix a manual trace with a spanId of another trace.
+func (c *cloudLoggingHandler) handleTrace(ctx context.Context, r *slog.Record, knownAttrs []slog.Attr) {
 	if c.opts.ProjectID == "" {
 		return
 	}
@@ -18,33 +21,43 @@ func (c *cloudLoggingHandler) handleTrace(ctx context.Context, r *slog.Record) {
 		return
 	}
 
-	c.handleOpencensusTrace(ctx, r)
-	c.handleOpentelemetryTrace(ctx, r)
-}
-
-func (c *cloudLoggingHandler) handleOpencensusTrace(ctx context.Context, r *slog.Record) {
-	span := opencensusTrace.FromContext(ctx)
-	if span == nil {
+	if c.hasManualTraceKey(knownAttrs) {
 		return
 	}
 
-	spanCtx := span.SpanContext()
-	r.AddAttrs(
-		slog.String(TraceKey, fmt.Sprintf("projects/%s/traces/%s", c.opts.ProjectID, spanCtx.TraceID.String())),
-		slog.String(SpanIDKey, spanCtx.SpanID.String()),
-		slog.Bool(TraceSampledKey, spanCtx.IsSampled()),
-	)
+	r.AddAttrs(c.traceAttrsFromContext(ctx)...)
 }
 
-func (c *cloudLoggingHandler) handleOpentelemetryTrace(ctx context.Context, r *slog.Record) {
-	spanCtx := opentelemetryTrace.SpanContextFromContext(ctx)
-
-	if !spanCtx.HasTraceID() || !spanCtx.HasSpanID() {
-		return
+func (c *cloudLoggingHandler) hasManualTraceKey(knownAttrs []slog.Attr) bool {
+	for _, key := range []string{TraceKey, SpanIDKey, TraceSampledKey} {
+		if _, ok := c.withKnownKeys[key]; ok {
+			return true
+		}
+		if slices.ContainsFunc(knownAttrs, func(a slog.Attr) bool { return a.Key == key }) {
+			return true
+		}
 	}
-	r.AddAttrs(
-		slog.String(TraceKey, fmt.Sprintf("projects/%s/traces/%s", c.opts.ProjectID, spanCtx.TraceID().String())),
-		slog.String(SpanIDKey, spanCtx.SpanID().String()),
-		slog.Bool(TraceSampledKey, spanCtx.IsSampled()),
-	)
+	return false
+}
+
+// traceAttrsFromContext prefers OpenTelemetry to OpenCensus because OpenCensus is deprecated.
+func (c *cloudLoggingHandler) traceAttrsFromContext(ctx context.Context) []slog.Attr {
+	if spanCtx := opentelemetryTrace.SpanContextFromContext(ctx); spanCtx.IsValid() {
+		return c.makeTraceAttrs(spanCtx.TraceID().String(), spanCtx.SpanID().String(), spanCtx.IsSampled())
+	}
+
+	if span := opencensusTrace.FromContext(ctx); span != nil {
+		spanCtx := span.SpanContext()
+		return c.makeTraceAttrs(spanCtx.TraceID.String(), spanCtx.SpanID.String(), spanCtx.IsSampled())
+	}
+
+	return nil
+}
+
+func (c *cloudLoggingHandler) makeTraceAttrs(traceID, spanID string, sampled bool) []slog.Attr {
+	return []slog.Attr{
+		slog.String(TraceKey, fmt.Sprintf("projects/%s/traces/%s", c.opts.ProjectID, traceID)),
+		slog.String(SpanIDKey, spanID),
+		slog.Bool(TraceSampledKey, sampled),
+	}
 }

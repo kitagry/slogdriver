@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"maps"
 	"os"
 	"slices"
 )
@@ -14,6 +15,9 @@ const (
 	HTTPKey           = "httpRequest"
 	SourceLocationKey = "logging.googleapis.com/sourceLocation"
 	LabelKey          = "logging.googleapis.com/labels"
+
+	InsertIDKey  = "logging.googleapis.com/insertId"
+	OperationKey = "logging.googleapis.com/operation"
 
 	TraceKey        = "logging.googleapis.com/trace"
 	SpanIDKey       = "logging.googleapis.com/spanId"
@@ -26,6 +30,8 @@ var knownKeys = map[string]struct{}{
 	HTTPKey:           {},
 	SourceLocationKey: {},
 	LabelKey:          {},
+	InsertIDKey:       {},
+	OperationKey:      {},
 	TraceKey:          {},
 	SpanIDKey:         {},
 	TraceSampledKey:   {},
@@ -35,7 +41,9 @@ type cloudLoggingHandler struct {
 	slog.Handler
 	labels []slog.Attr
 	groups []group
-	opts   HandlerOptions
+	// withKnownKeys holds known keys passed to WithAttrs, which are already written by Handler.
+	withKnownKeys map[string]struct{}
+	opts          HandlerOptions
 }
 
 type group struct {
@@ -80,13 +88,18 @@ func NewHandler(w io.Writer, opts HandlerOptions) slog.Handler {
 		AddSource: false,
 		Level:     opts.Level,
 		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+			// Built-in level/message attrs are always top-level; nested ones are user attrs.
+			if len(groups) > 0 {
+				return a
+			}
 			switch a.Key {
 			case slog.LevelKey:
-				val := levelStringToSeverity(a.Value.String())
-				return slog.Attr{
-					Key:   SeverityKey,
-					Value: slog.StringValue(val),
+				// User attrs may also use the "level" key, but only the built-in one holds a slog.Level.
+				level, ok := a.Value.Any().(slog.Level)
+				if !ok {
+					return a
 				}
+				return slog.String(SeverityKey, levelToSeverity(level))
 			case slog.MessageKey:
 				if a.Value.String() == "" {
 					return slog.Attr{}
@@ -149,29 +162,29 @@ func (c *cloudLoggingHandler) Handle(ctx context.Context, r slog.Record) error {
 		newRecord.AddAttrs(c.makeSourceLocationAttr(r))
 	}
 
-	c.handleTrace(ctx, &newRecord)
+	c.handleTrace(ctx, &newRecord, knownAttrs)
 
 	return c.Handler.Handle(ctx, newRecord)
 }
 
 func (c *cloudLoggingHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	var labels []slog.Attr
+	var newKnownKeys []string
 	i := 0
 	groupAttrs := make([]any, 0, len(attrs))
 	for _, a := range attrs {
 		if a.Key == LabelKey && a.Value.Kind() == slog.KindGroup {
-			labels = make([]slog.Attr, len(a.Value.Group()))
-			for i, attr := range a.Value.Group() {
-				labels[i] = attr
-			}
+			labels = append(labels, a.Value.Group()...)
 			continue
 		}
 
-		if len(c.groups) > 0 {
-			if _, ok := knownKeys[a.Key]; !ok {
-				groupAttrs = append(groupAttrs, a)
-				continue
-			}
+		_, known := knownKeys[a.Key]
+		if len(c.groups) > 0 && !known {
+			groupAttrs = append(groupAttrs, a)
+			continue
+		}
+		if known {
+			newKnownKeys = append(newKnownKeys, a.Key)
 		}
 
 		attrs[i] = a
@@ -180,6 +193,16 @@ func (c *cloudLoggingHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	attrs = attrs[:i]
 	l := c.Handler.WithAttrs(attrs)
 	h := c.clone(l)
+	if len(newKnownKeys) > 0 {
+		// clone shares withKnownKeys, so copy it before mutating.
+		h.withKnownKeys = maps.Clone(c.withKnownKeys)
+		if h.withKnownKeys == nil {
+			h.withKnownKeys = make(map[string]struct{}, len(newKnownKeys))
+		}
+		for _, k := range newKnownKeys {
+			h.withKnownKeys[k] = struct{}{}
+		}
+	}
 	h.labels = append(h.labels, labels...)
 
 	if len(groupAttrs) > 0 {
@@ -196,9 +219,13 @@ func (c *cloudLoggingHandler) WithGroup(name string) slog.Handler {
 }
 
 func (c *cloudLoggingHandler) clone(handler slog.Handler) *cloudLoggingHandler {
-	labels := slices.Clone(c.labels)
-	groups := slices.Clone(c.groups)
-	return &cloudLoggingHandler{handler, labels, groups, c.opts}
+	return &cloudLoggingHandler{
+		Handler:       handler,
+		labels:        slices.Clone(c.labels),
+		groups:        slices.Clone(c.groups),
+		withKnownKeys: c.withKnownKeys, // read-only; WithAttrs copies it before adding keys
+		opts:          c.opts,
+	}
 }
 
 func toAnySlice[T any](tl []T) []any {

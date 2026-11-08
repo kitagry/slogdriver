@@ -240,3 +240,48 @@ func TestGroup(t *testing.T) {
 		t.Errorf("trace sampled key not found")
 	}
 }
+
+func TestLabels_MultipleLabelGroupsInOneWith(t *testing.T) {
+	var buf bytes.Buffer
+
+	logger := slogdriver.New(&buf, slogdriver.HandlerOptions{})
+	logger = logger.With(
+		slog.Group(slogdriver.LabelKey, slog.String("a", "1")),
+		slog.Group(slogdriver.LabelKey, slog.String("b", "2")),
+	)
+	logger.Info("Hello World")
+
+	var result struct {
+		Labels map[string]any `json:"logging.googleapis.com/labels"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+
+	expected := map[string]any{"a": "1", "b": "2"}
+	if !maps.Equal(result.Labels, expected) {
+		t.Errorf("labels should be %v got %v", expected, result.Labels)
+	}
+}
+
+func TestGroup_InsertIDAndOperationShouldBeTopLevel(t *testing.T) {
+	var buf bytes.Buffer
+
+	logger := slogdriver.New(&buf, slogdriver.HandlerOptions{})
+	logger.WithGroup("g").
+		With(slog.String(slogdriver.InsertIDKey, "insert-id")).
+		Info("Hello World", slog.Group(slogdriver.OperationKey, slog.String("id", "op-id")))
+
+	var result map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+
+	if result[slogdriver.InsertIDKey] != "insert-id" {
+		t.Errorf("%s should be top-level, got %v", slogdriver.InsertIDKey, result)
+	}
+	expectedOperation := map[string]any{"id": "op-id"}
+	if op, _ := result[slogdriver.OperationKey].(map[string]any); !maps.Equal(op, expectedOperation) {
+		t.Errorf("%s should be top-level %v, got %v", slogdriver.OperationKey, expectedOperation, result)
+	}
+}

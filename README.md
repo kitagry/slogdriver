@@ -49,6 +49,8 @@ logger := slogdriver.New(os.Stdout, slogdriver.HandlerOptions{
 logger.Log(context.Background(), slogdriver.LevelEmergency, "emergency msg")
 ```
 
+Other levels are mapped to the nearest severity at or below them (e.g. `slog.LevelInfo+1` is `INFO`, and levels below `LevelDefault` are `DEFAULT`).
+
 #### HTTP request
 
 To log HTTP related metrics and information, you can create slog.Attr with the following function.
@@ -118,6 +120,9 @@ handler := otelhttp.NewHandler(handler, traceName)
 
 You can see [example for Cloud Run](./examples/cloudrun).
 
+If you set any of `slogdriver.TraceKey`, `slogdriver.SpanIDKey` or `slogdriver.TraceSampledKey` manually (in log arguments or `With`), trace information from the context is not added, so that a manual trace is not mixed with a span of another trace.
+When both OpenTelemetry and OpenCensus spans are in the context, the OpenTelemetry span is used.
+
 #### Labels
 
 You can add any "labels" to your log as following:
@@ -138,6 +143,19 @@ logger.Warn("Hello World", slog.Group(slogdriver.LabelKey, slog.String("label2",
 // {"severity":"WARNING","message":"Hello World","logging.googleapis.com/labels":{"commonLabel":"hoge","label2":"fuga"}}
 ```
 
+#### InsertID and Operation
+
+`slogdriver.InsertIDKey` and `slogdriver.OperationKey` are always written at the top level, even under `WithGroup`.
+
+```go
+logger.Info("Hello World",
+	slog.String(slogdriver.InsertIDKey, "insert-id"),
+	slog.Group(slogdriver.OperationKey, slog.String("id", "operation-id"), slog.String("producer", "my-job")),
+)
+// got:
+// {"severity":"INFO","message":"Hello World","logging.googleapis.com/insertId":"insert-id","logging.googleapis.com/operation":{"id":"operation-id","producer":"my-job"}}
+```
+
 #### Source Location
 
 ```go
@@ -152,9 +170,9 @@ logger.Info("Hello World")
 - [x] message
 - [x] httpRequest
 - [x] time, timestamp
-- [ ] insertId
+- [x] insertId
 - [x] labels
-- [ ] operation
+- [x] operation
 - [x] sourceLocation
 - [x] spanId
 - [x] trace
