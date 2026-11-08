@@ -1,11 +1,31 @@
-# To get started with Dependabot version updates, you'll need to specify which
-# package ecosystems to update and where the package manifests are located.
 # Please see the documentation for all configuration options:
-# https://docs.github.com/github/administering-a-repository/configuration-options-for-dependency-updates
+# https://docs.github.com/en/code-security/dependabot/working-with-dependabot/dependabot-options-reference
 
 version: 2
 updates:
-  - package-ecosystem: "gomod" # See documentation for possible values
-    directory: "/" # Location of package manifests
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      # otel modules are released together; keep them in a single PR.
+      opentelemetry:
+        patterns:
+          - "go.opentelemetry.io/*"
+
+  # Groups apply to a whole update block, so examples/cloudrun has its own
+  # block to bundle all of its dependencies into one PR without affecting the
+  # root module. Its dependencies are far behind (#141).
+  - package-ecosystem: "gomod"
+    directory: "/examples/cloudrun"
+    schedule:
+      interval: "weekly"
+    groups:
+      examples-cloudrun:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
     schedule:
       interval: "weekly"
