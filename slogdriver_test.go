@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"log/slog"
 	"maps"
 	"os"
@@ -11,6 +13,7 @@ import (
 	"slices"
 	"testing"
 	"testing/slogtest"
+	"time"
 
 	"github.com/kitagry/slogdriver"
 	"go.opentelemetry.io/contrib/detectors/gcp"
@@ -632,4 +635,152 @@ func TestBuiltinKeys_UserAttrsShouldNotDuplicateSeverityAndMessage(t *testing.T)
 			}
 		})
 	}
+}
+
+type stringerValue struct{}
+
+func (stringerValue) String() string { return "stringer" }
+
+type textMarshalerValue struct{}
+
+func (textMarshalerValue) MarshalText() ([]byte, error) { return []byte("text"), nil }
+
+func TestLabels_ValuesShouldBeStrings(t *testing.T) {
+	ts := time.Date(2026, 11, 8, 12, 34, 56, 789, time.UTC)
+	attrs := []slog.Attr{
+		slog.String("string", "s"),
+		slog.Int("int", -1),
+		slog.Uint64("uint", 2),
+		slog.Float64("float", 1.5),
+		slog.Bool("bool", true),
+		slog.Duration("duration", 1500*time.Millisecond),
+		slog.Time("time", ts),
+		slog.Any("error", errors.New("boom")),
+		slog.Any("stringer", stringerValue{}),
+		slog.Any("textMarshaler", textMarshalerValue{}),
+		slog.Any("bytes", []byte("raw")),
+		slog.Any("valuer", labelsValuer{}),
+		slog.Group("group", slog.Int("int", 3), slog.Group("nested", slog.Bool("bool", false))),
+		slog.Any("map", map[string]int{"x": 4}),
+		slog.Group("", slog.String("inline", "i")),
+		slog.Group("empty"),
+	}
+	want := map[string]any{
+		"string":            "s",
+		"int":               "-1",
+		"uint":              "2",
+		"float":             "1.5",
+		"bool":              "true",
+		"duration":          "1.5s",
+		"time":              "2026-11-08T12:34:56.000000789Z",
+		"error":             "boom",
+		"stringer":          "stringer",
+		"textMarshaler":     "text",
+		"bytes":             "raw",
+		"valuer.valuer":     "v",
+		"group.int":         "3",
+		"group.nested.bool": "false",
+		"map.x":             "4",
+		"inline":            "i",
+	}
+
+	tests := map[string]func(io.Writer){
+		"DefaultLabels": func(w io.Writer) {
+			slogdriver.New(w, slogdriver.HandlerOptions{DefaultLabels: attrs}).Info("Hello World")
+		},
+		"With": func(w io.Writer) {
+			slogdriver.New(w, slogdriver.HandlerOptions{}).
+				With(slog.Group(slogdriver.LabelKey, toAny(attrs)...)).Info("Hello World")
+		},
+		"log argument": func(w io.Writer) {
+			slogdriver.New(w, slogdriver.HandlerOptions{}).
+				Info("Hello World", slog.Group(slogdriver.LabelKey, toAny(attrs)...))
+		},
+		"LogValuer in log argument": func(w io.Writer) {
+			slogdriver.New(w, slogdriver.HandlerOptions{}).
+				Info("Hello World", slog.Any(slogdriver.LabelKey, groupValuer(attrs)))
+		},
+	}
+	for name, log := range tests {
+		t.Run(name, func(t *testing.T) {
+			var buf bytes.Buffer
+			log(&buf)
+
+			got := assertKeyOnce(t, buf.Bytes(), slogdriver.LabelKey)
+			if labels, _ := got[slogdriver.LabelKey].(map[string]any); !maps.Equal(labels, want) {
+				t.Errorf("labels should be\n%v\ngot\n%v", want, got[slogdriver.LabelKey])
+			}
+		})
+	}
+}
+
+func TestLabels_MapValuesShouldBeStrings(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slogdriver.New(&buf, slogdriver.HandlerOptions{})
+
+	logger.Info("Hello World", slog.Any(slogdriver.LabelKey, map[string]any{"n": 1, "b": true}))
+
+	got := assertKeyOnce(t, buf.Bytes(), slogdriver.LabelKey)
+	want := map[string]any{"n": "1", "b": "true"}
+	if labels, _ := got[slogdriver.LabelKey].(map[string]any); !maps.Equal(labels, want) {
+		t.Errorf("labels should be %v, got %v", want, got[slogdriver.LabelKey])
+	}
+}
+
+func TestLabels_LaterKeyShouldWin(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slogdriver.New(&buf, slogdriver.HandlerOptions{
+		DefaultLabels: []slog.Attr{
+			slog.String("default", "default"),
+			slog.String("with1", "default"),
+			slog.String("with2", "default"),
+			slog.String("arg", "default"),
+		},
+	})
+
+	logger.
+		With(slog.Group(slogdriver.LabelKey, slog.String("with1", "with1"), slog.String("with2", "with1"), slog.String("arg", "with1"))).
+		With(slog.Group(slogdriver.LabelKey, slog.String("with2", "with2"), slog.String("arg", "with2"))).
+		Info("Hello World",
+			// A nested group key and a dotted key are the same label.
+			slog.Group(slogdriver.LabelKey, slog.Group("a", slog.String("b", "group"))),
+			slog.Group(slogdriver.LabelKey, slog.String("arg", "arg"), slog.String("a.b", "dotted")),
+		)
+
+	got := assertKeyOnce(t, buf.Bytes(), slogdriver.LabelKey)
+	want := map[string]any{"default": "default", "with1": "with1", "with2": "with2", "arg": "arg", "a.b": "dotted"}
+	if labels, _ := got[slogdriver.LabelKey].(map[string]any); !maps.Equal(labels, want) {
+		t.Errorf("labels should be %v, got %v", want, got[slogdriver.LabelKey])
+	}
+	for key := range want {
+		if n := bytes.Count(buf.Bytes(), []byte(`"`+key+`":`)); n != 1 {
+			t.Errorf("%s should be written once, got %d times: %s", key, n, buf.Bytes())
+		}
+	}
+}
+
+func TestLabels_LogValuerInWithShouldBeResolvedOnce(t *testing.T) {
+	var buf bytes.Buffer
+	n := 0
+	logger := slogdriver.New(&buf, slogdriver.HandlerOptions{}).
+		With(slog.Group(slogdriver.LabelKey, slog.Any("v", countingValuer{&n})))
+
+	logger.Info("first")
+	logger.Info("second")
+
+	if n != 1 {
+		t.Errorf("LogValue passed to With should be called once like other attrs, got %d", n)
+	}
+}
+
+type groupValuer []slog.Attr
+
+func (g groupValuer) LogValue() slog.Value { return slog.GroupValue(g...) }
+
+func toAny(attrs []slog.Attr) []any {
+	result := make([]any, len(attrs))
+	for i, a := range attrs {
+		result[i] = a
+	}
+	return result
 }

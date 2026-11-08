@@ -2,6 +2,7 @@ package slogdriver
 
 import (
 	"context"
+	"encoding"
 	"io"
 	"log/slog"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"time"
 )
 
 // builtinKeyPrefix is prepended to the key of a top-level user attribute named MessageKey or SeverityKey,
@@ -20,7 +22,9 @@ const (
 	SeverityKey       = "severity"
 	HTTPKey           = "httpRequest"
 	SourceLocationKey = "logging.googleapis.com/sourceLocation"
-	LabelKey          = "logging.googleapis.com/labels"
+	// LabelKey is the key of the labels group. Its values are written as strings and nested groups are flattened with ".",
+	// because Cloud Logging labels are map<string,string>.
+	LabelKey = "logging.googleapis.com/labels"
 
 	InsertIDKey  = "logging.googleapis.com/insertId"
 	OperationKey = "logging.googleapis.com/operation"
@@ -44,6 +48,7 @@ var knownKeys = map[string]struct{}{
 
 type cloudLoggingHandler struct {
 	slog.Handler
+	// labels holds DefaultLabels and the labels passed to WithAttrs, already converted by appendLabels and unique by key.
 	labels []slog.Attr
 	groups []group
 	// knownAttrs holds known keys passed to WithAttrs. They are written in Handle instead of by Handler,
@@ -79,6 +84,8 @@ type HandlerOptions struct {
 	Level slog.Leveler
 
 	// DefaultLabels is a set of default labels to be added to each log entry.
+	// Like the other labels, the values are written as strings and nested groups are flattened; see LabelKey.
+	// They are converted once in NewHandler, so a slog.LogValuer is resolved only once, as in With.
 	DefaultLabels []slog.Attr
 
 	// ErrorReporting makes logs at slog.LevelError or above reported to Cloud Error Reporting.
@@ -132,6 +139,7 @@ func NewHandler(w io.Writer, opts HandlerOptions) slog.Handler {
 
 	h := &cloudLoggingHandler{
 		Handler: slog.NewJSONHandler(w, &slogOpts),
+		labels:  uniqueByKey(appendLabels(nil, "", opts.DefaultLabels)),
 		opts:    opts,
 	}
 	if opts.ErrorReporting != nil {
@@ -145,16 +153,13 @@ var _ slog.Handler = (*cloudLoggingHandler)(nil)
 
 func (c *cloudLoggingHandler) Handle(ctx context.Context, r slog.Record) error {
 	newRecord := slog.NewRecord(r.Time, r.Level, r.Message, 0)
-	labels := make([]slog.Attr, 0, len(c.opts.DefaultLabels)+len(c.labels))
-	labels = append(labels, c.opts.DefaultLabels...)
-	labels = append(labels, c.labels...)
-	var argKnownAttrs []slog.Attr
+	var argLabels, argKnownAttrs []slog.Attr
 	normalAttrs := make([]slog.Attr, 0, r.NumAttrs())
 	r.Attrs(func(a slog.Attr) bool {
 		a, kind := classifyAttr(a)
 		switch kind {
 		case labelAttr:
-			labels = append(labels, a.Value.Group()...)
+			argLabels = appendLabels(argLabels, "", a.Value.Group())
 		case knownAttr:
 			argKnownAttrs = append(argKnownAttrs, a)
 		default:
@@ -163,6 +168,10 @@ func (c *cloudLoggingHandler) Handle(ctx context.Context, r slog.Record) error {
 		return true
 	})
 	knownAttrs := c.mergeKnownAttrs(argKnownAttrs)
+	labels := c.labels
+	if len(argLabels) > 0 {
+		labels = uniqueByKey(slices.Concat(c.labels, argLabels))
+	}
 
 	if len(c.groups) == 0 {
 		escapeTopLevelAttrs(normalAttrs)
@@ -174,7 +183,7 @@ func (c *cloudLoggingHandler) Handle(ctx context.Context, r slog.Record) error {
 	newRecord.Add(groupedAttr...)
 
 	if len(labels) > 0 {
-		newRecord.AddAttrs(slog.Group(LabelKey, toAnySlice(labels)...))
+		newRecord.AddAttrs(slog.Attr{Key: LabelKey, Value: slog.GroupValue(labels...)})
 	}
 
 	if len(knownAttrs) > 0 {
@@ -208,7 +217,7 @@ func (c *cloudLoggingHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 		a, kind := classifyAttr(a)
 		switch kind {
 		case labelAttr:
-			labels = append(labels, a.Value.Group()...)
+			labels = appendLabels(labels, "", a.Value.Group())
 		case knownAttr:
 			knownAttrs = append(knownAttrs, a)
 		default:
@@ -222,7 +231,9 @@ func (c *cloudLoggingHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 		handler = c.Handler.WithAttrs(normalAttrs)
 	}
 	h := c.clone(handler)
-	h.labels = append(h.labels, labels...)
+	if len(labels) > 0 {
+		h.labels = uniqueByKey(slices.Concat(c.labels, labels))
+	}
 	if len(knownAttrs) > 0 {
 		h.knownAttrs = uniqueByKey(slices.Concat(c.knownAttrs, knownAttrs))
 	}
@@ -244,7 +255,7 @@ func (c *cloudLoggingHandler) WithGroup(name string) slog.Handler {
 func (c *cloudLoggingHandler) clone(handler slog.Handler) *cloudLoggingHandler {
 	return &cloudLoggingHandler{
 		Handler:        handler,
-		labels:         slices.Clone(c.labels),
+		labels:         c.labels, // read-only; WithAttrs replaces it with a new slice
 		groups:         slices.Clone(c.groups),
 		knownAttrs:     c.knownAttrs, // read-only; WithAttrs replaces it with a new slice
 		opts:           c.opts,
@@ -341,6 +352,57 @@ func mapToGroupValue(v slog.Value) (slog.Value, bool) {
 	return slog.GroupValue(attrs...), true
 }
 
+// appendLabels appends attrs to dst as string labels, because Cloud Logging labels are map<string,string>.
+// Nested groups and maps are flattened by joining the keys with "." under prefix, and LogValuers are resolved.
+func appendLabels(dst []slog.Attr, prefix string, attrs []slog.Attr) []slog.Attr {
+	for _, a := range attrs {
+		v := a.Value.Resolve()
+		if g, ok := mapToGroupValue(v); ok {
+			v = g
+		}
+		if v.Kind() == slog.KindGroup {
+			// Like slog, the attrs of a group with an empty key are inlined.
+			p := prefix
+			if a.Key != "" {
+				p = joinLabelKey(prefix, a.Key)
+			}
+			dst = appendLabels(dst, p, v.Group())
+			continue
+		}
+		if a.Key == "" {
+			continue
+		}
+		dst = append(dst, slog.String(joinLabelKey(prefix, a.Key), labelString(v)))
+	}
+	return dst
+}
+
+func joinLabelKey(prefix, key string) string {
+	if prefix == "" {
+		return key
+	}
+	return prefix + "." + key
+}
+
+// labelString formats a label value like slog.TextHandler, except that a time is written in RFC 3339 with nanoseconds.
+func labelString(v slog.Value) string {
+	switch v.Kind() {
+	case slog.KindTime:
+		// Value.String uses time.Time.String, which is not meant to be parsed.
+		return v.Time().Format(time.RFC3339Nano)
+	case slog.KindAny:
+		switch x := v.Any().(type) {
+		case encoding.TextMarshaler:
+			if text, err := x.MarshalText(); err == nil {
+				return string(text)
+			}
+		case []byte:
+			return string(x)
+		}
+	}
+	return v.String()
+}
+
 // mergeKnownAttrs merges the known keys passed to WithAttrs and the log arguments, preferring the log arguments.
 // Trace keys passed to WithAttrs are dropped as a whole if the log arguments have any of them, so as not to mix two traces.
 func (c *cloudLoggingHandler) mergeKnownAttrs(argAttrs []slog.Attr) []slog.Attr {
@@ -356,7 +418,7 @@ func (c *cloudLoggingHandler) mergeKnownAttrs(argAttrs []slog.Attr) []slog.Attr 
 }
 
 // uniqueByKey keeps the last attr of each key in place, so callers must pass a slice they own.
-// It scans linearly instead of using a map, because it runs on every log with known keys and attrs has at most a few of them.
+// It scans linearly instead of using a map, because it runs on every log with known keys or labels, and they are usually few.
 func uniqueByKey(attrs []slog.Attr) []slog.Attr {
 	result := attrs[:0]
 	for i, a := range attrs {
