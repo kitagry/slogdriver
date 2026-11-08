@@ -167,6 +167,7 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
+// Add an exporter (e.g. sdktrace.WithBatcher(exporter)) to send the spans to Cloud Trace.
 otel.SetTracerProvider(sdktrace.NewTracerProvider())
 opencensus.InstallTraceBridge()
 ```
