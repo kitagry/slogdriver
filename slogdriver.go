@@ -11,6 +11,10 @@ import (
 	"strings"
 )
 
+// builtinKeyPrefix is prepended to the key of a top-level user attribute named MessageKey or SeverityKey,
+// so that it does not duplicate the built-in one.
+const builtinKeyPrefix = "fields."
+
 const (
 	MessageKey        = "message"
 	SeverityKey       = "severity"
@@ -26,9 +30,9 @@ const (
 	TraceSampledKey = "logging.googleapis.com/trace_sampled"
 )
 
+// knownKeys are written at the top level even under WithGroup.
+// MessageKey and SeverityKey are not included, because they are written from the record; see builtinKeyPrefix.
 var knownKeys = map[string]struct{}{
-	MessageKey:        {},
-	SeverityKey:       {},
 	HTTPKey:           {},
 	SourceLocationKey: {},
 	InsertIDKey:       {},
@@ -110,6 +114,10 @@ func NewHandler(w io.Writer, opts HandlerOptions) slog.Handler {
 				}
 				return slog.String(SeverityKey, levelToSeverity(level))
 			case slog.MessageKey:
+				if v, ok := a.Value.Any().(userMessageValue); ok {
+					a.Value = v.Value
+					return a
+				}
 				if a.Value.String() == "" {
 					return slog.Attr{}
 				}
@@ -117,6 +125,9 @@ func NewHandler(w io.Writer, opts HandlerOptions) slog.Handler {
 					Key:   MessageKey,
 					Value: a.Value,
 				}
+			case SeverityKey, MessageKey:
+				// The built-in ones are converted from the level/msg attrs above, so these are user attrs.
+				a.Key = builtinKeyPrefix + a.Key
 			}
 			return a
 		},
@@ -141,7 +152,7 @@ func (c *cloudLoggingHandler) Handle(ctx context.Context, r slog.Record) error {
 	labels = append(labels, c.opts.DefaultLabels...)
 	labels = append(labels, c.labels...)
 	var argKnownAttrs []slog.Attr
-	normalAttrs := make([]any, 0, r.NumAttrs())
+	normalAttrs := make([]slog.Attr, 0, r.NumAttrs())
 	r.Attrs(func(a slog.Attr) bool {
 		a, kind := classifyAttr(a)
 		switch kind {
@@ -156,7 +167,10 @@ func (c *cloudLoggingHandler) Handle(ctx context.Context, r slog.Record) error {
 	})
 	knownAttrs := c.mergeKnownAttrs(argKnownAttrs)
 
-	groupedAttr := slices.Clone(normalAttrs)
+	if len(c.groups) == 0 {
+		markUserMessageAttrs(normalAttrs)
+	}
+	groupedAttr := toAnySlice(normalAttrs)
 	for _, group := range slices.Backward(c.groups) {
 		groupedAttr = []any{slog.Group(group.name, slices.Concat(group.attrs, groupedAttr)...)}
 	}
@@ -171,12 +185,13 @@ func (c *cloudLoggingHandler) Handle(ctx context.Context, r slog.Record) error {
 	}
 
 	reportError := c.serviceContext != nil && r.Level >= slog.LevelError
+	addSource := c.opts.AddSource && !slices.ContainsFunc(knownAttrs, isSourceLocationAttr)
 	var frame runtime.Frame
-	if c.opts.AddSource || reportError {
+	if addSource || reportError {
 		frame = recordFrame(r)
 	}
 
-	if c.opts.AddSource {
+	if addSource {
 		newRecord.AddAttrs(makeSourceLocationAttr(frame))
 	}
 
@@ -206,6 +221,7 @@ func (c *cloudLoggingHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 
 	handler := c.Handler
 	if len(c.groups) == 0 && len(normalAttrs) > 0 {
+		markUserMessageAttrs(normalAttrs)
 		handler = c.Handler.WithAttrs(normalAttrs)
 	}
 	h := c.clone(handler)
@@ -236,6 +252,23 @@ func (c *cloudLoggingHandler) clone(handler slog.Handler) *cloudLoggingHandler {
 		knownAttrs:     c.knownAttrs, // read-only; WithAttrs replaces it with a new slice
 		opts:           c.opts,
 		serviceContext: c.serviceContext,
+	}
+}
+
+// userMessageValue marks a top-level user attr named slog.MessageKey,
+// because ReplaceAttr cannot tell it from the built-in message, which is converted to MessageKey.
+type userMessageValue struct{ slog.Value }
+
+// markUserMessageAttrs modifies attrs in place, so callers must pass a slice they own.
+func markUserMessageAttrs(attrs []slog.Attr) {
+	for i, a := range attrs {
+		if a.Key != slog.MessageKey {
+			continue
+		}
+		// ReplaceAttr is not called for groups, so they are written as is.
+		if v := a.Value.Resolve(); v.Kind() != slog.KindGroup {
+			attrs[i].Value = slog.AnyValue(userMessageValue{v})
+		}
 	}
 }
 

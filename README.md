@@ -51,6 +51,13 @@ logger.Log(context.Background(), slogdriver.LevelEmergency, "emergency msg")
 
 Other levels are mapped to the nearest severity at or below them (e.g. `slog.LevelInfo+1` is `INFO`, and levels below `LevelDefault` are `DEFAULT`).
 
+`severity` and `message` are always taken from the record's level and message. Attributes with these keys are ordinary attributes: under a group they are kept as is, and at the top level they are renamed to `fields.severity` and `fields.message`, so that they do not duplicate the built-in keys. Attributes with the keys `level` and `msg` are written as is.
+
+```go
+logger.Info("Hello World", slog.String("severity", "custom"), slog.Group("g", slog.String("message", "nested")))
+// {"severity":"INFO","message":"Hello World","fields.severity":"custom","g":{"message":"nested"}}
+```
+
 #### HTTP request
 
 To log HTTP related metrics and information, you can create slog.Attr with the following function.
@@ -207,6 +214,13 @@ logger.With(slog.String(slogdriver.InsertIDKey, "with")).Info("Hello World", slo
 logger := slogdriver.New(os.Stdout, slogdriver.HandlerOptions{AddSource: true})
 logger.Info("Hello World")
 // {"severity":"INFO","message":"Hello World","logging.googleapis.com/sourceLocation":{"file":"/path/to/source.go","line":"12","function":"yourFunction"}}
+```
+
+A `logging.googleapis.com/sourceLocation` passed manually (as a log argument or via `With`) is preferred, and the automatic one is not added. This is useful for a helper function that logs on behalf of its caller.
+
+```go
+logger.Info("Hello World", slog.Any(slogdriver.SourceLocationKey, slogdriver.LogEntrySourceLocation{File: "caller.go", Line: "34", Function: "caller"}))
+// {"severity":"INFO","message":"Hello World","logging.googleapis.com/sourceLocation":{"file":"caller.go","line":"34","function":"caller"}}
 ```
 
 #### Error Reporting
