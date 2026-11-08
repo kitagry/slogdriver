@@ -8,6 +8,7 @@ import (
 	"maps"
 	"os"
 	"testing"
+	"testing/slogtest"
 
 	"github.com/kitagry/slogdriver"
 	"go.opentelemetry.io/contrib/detectors/gcp"
@@ -26,6 +27,41 @@ func ExampleNew() {
 	)
 	logger = logger.With(slog.Group(slogdriver.LabelKey, slog.String("commonLabel", "fuga")))
 	logger.Info("Hello World", slog.Group(slogdriver.LabelKey, slog.String("specifiedLabel", "piyo")))
+}
+
+func TestHandler(t *testing.T) {
+	var buf bytes.Buffer
+	slogtest.Run(
+		t,
+		func(t *testing.T) slog.Handler {
+			buf.Reset()
+			return slogdriver.NewHandler(&buf, slogdriver.HandlerOptions{})
+		},
+		func(t *testing.T) map[string]any {
+			line := buf.Bytes()
+			if len(line) == 0 {
+				return nil
+			}
+
+			var m map[string]any
+			if err := json.Unmarshal(line, &m); err != nil {
+				t.Fatal(err)
+			}
+
+			for k := range m {
+				switch k {
+				case slogdriver.SeverityKey:
+					m[slog.LevelKey] = m[k]
+					delete(m, k)
+				case slogdriver.MessageKey:
+					m[slog.MessageKey] = m[k]
+					delete(m, k)
+				}
+			}
+
+			return m
+		},
+	)
 }
 
 func TestLabels(t *testing.T) {
@@ -202,5 +238,50 @@ func TestGroup(t *testing.T) {
 	}
 	if result.TraceSampled == nil {
 		t.Errorf("trace sampled key not found")
+	}
+}
+
+func TestLabels_MultipleLabelGroupsInOneWith(t *testing.T) {
+	var buf bytes.Buffer
+
+	logger := slogdriver.New(&buf, slogdriver.HandlerOptions{})
+	logger = logger.With(
+		slog.Group(slogdriver.LabelKey, slog.String("a", "1")),
+		slog.Group(slogdriver.LabelKey, slog.String("b", "2")),
+	)
+	logger.Info("Hello World")
+
+	var result struct {
+		Labels map[string]any `json:"logging.googleapis.com/labels"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+
+	expected := map[string]any{"a": "1", "b": "2"}
+	if !maps.Equal(result.Labels, expected) {
+		t.Errorf("labels should be %v got %v", expected, result.Labels)
+	}
+}
+
+func TestGroup_InsertIDAndOperationShouldBeTopLevel(t *testing.T) {
+	var buf bytes.Buffer
+
+	logger := slogdriver.New(&buf, slogdriver.HandlerOptions{})
+	logger.WithGroup("g").
+		With(slog.String(slogdriver.InsertIDKey, "insert-id")).
+		Info("Hello World", slog.Group(slogdriver.OperationKey, slog.String("id", "op-id")))
+
+	var result map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+
+	if result[slogdriver.InsertIDKey] != "insert-id" {
+		t.Errorf("%s should be top-level, got %v", slogdriver.InsertIDKey, result)
+	}
+	expectedOperation := map[string]any{"id": "op-id"}
+	if op, _ := result[slogdriver.OperationKey].(map[string]any); !maps.Equal(op, expectedOperation) {
+		t.Errorf("%s should be top-level %v, got %v", slogdriver.OperationKey, expectedOperation, result)
 	}
 }

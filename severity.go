@@ -14,27 +14,27 @@ const (
 	LevelEmergency slog.Level = slog.LevelError + 6
 )
 
-func levelStringToSeverity(s string) string {
-	switch s {
-	case LevelDefault.String():
-		return "DEFAULT"
-	case LevelDebug.String():
-		return "DEBUG"
-	case LevelInfo.String():
-		return "INFO"
-	case LevelNotice.String():
-		return "NOTICE"
-	case LevelWarning.String():
-		return "WARNING"
-	case LevelError.String():
-		return "ERROR"
-	case LevelCritical.String():
-		return "CRITICAL"
-	case LevelAlert.String():
-		return "ALERT"
-	case LevelEmergency.String():
+// levelToSeverity maps a level to the nearest defined severity at or below it,
+// because slog allows arbitrary levels such as slog.LevelInfo+1.
+func levelToSeverity(l slog.Level) string {
+	switch {
+	case l >= LevelEmergency:
 		return "EMERGENCY"
+	case l >= LevelAlert:
+		return "ALERT"
+	case l >= LevelCritical:
+		return "CRITICAL"
+	case l >= LevelError:
+		return "ERROR"
+	case l >= LevelWarning:
+		return "WARNING"
+	case l >= LevelNotice:
+		return "NOTICE"
+	case l >= LevelInfo:
+		return "INFO"
+	case l >= LevelDebug:
+		return "DEBUG"
 	default:
-		return ""
+		return "DEFAULT"
 	}
 }
