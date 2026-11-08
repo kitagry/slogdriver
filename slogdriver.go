@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"maps"
 	"os"
+	"runtime"
 	"slices"
 )
 
@@ -91,7 +92,7 @@ func NewHandler(w io.Writer, opts HandlerOptions) slog.Handler {
 
 	slogOpts := slog.HandlerOptions{
 		// AddSource is handled in Handle method. So, this option is false.
-		// see cloudLoggingHandler.makeSourceLocationAttr.
+		// see makeSourceLocationAttr.
 		AddSource: false,
 		Level:     opts.Level,
 		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
@@ -170,14 +171,20 @@ func (c *cloudLoggingHandler) Handle(ctx context.Context, r slog.Record) error {
 		newRecord.AddAttrs(knownAttrs...)
 	}
 
+	reportError := c.serviceContext != nil && r.Level >= slog.LevelError
+	var frame runtime.Frame
+	if c.opts.AddSource || reportError {
+		frame = recordFrame(r)
+	}
+
 	if c.opts.AddSource {
-		newRecord.AddAttrs(c.makeSourceLocationAttr(r))
+		newRecord.AddAttrs(makeSourceLocationAttr(frame))
 	}
 
 	c.handleTrace(ctx, &newRecord, knownAttrs)
 
-	if c.serviceContext != nil && r.Level >= slog.LevelError {
-		newRecord.AddAttrs(c.errorReportingAttrs(r)...)
+	if reportError {
+		newRecord.AddAttrs(c.errorReportingAttrs(r, frame)...)
 	}
 
 	return c.Handler.Handle(ctx, newRecord)

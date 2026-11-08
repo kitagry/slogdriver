@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"slices"
 	"strings"
@@ -46,7 +47,8 @@ func newServiceContext(opts *ErrorReportingOptions) serviceContext {
 }
 
 // errorReportingAttrs must be called from Handle, because the stack trace is taken from the current call stack.
-func (c *cloudLoggingHandler) errorReportingAttrs(r slog.Record) []slog.Attr {
+// f is the frame of r.PC.
+func (c *cloudLoggingHandler) errorReportingAttrs(r slog.Record, f runtime.Frame) []slog.Attr {
 	attrs := []slog.Attr{
 		slog.String("@type", reportedErrorEventType),
 		slog.Any("serviceContext", *c.serviceContext),
@@ -55,14 +57,16 @@ func (c *cloudLoggingHandler) errorReportingAttrs(r slog.Record) []slog.Attr {
 		return attrs
 	}
 
-	f := recordFrame(r)
 	attrs = append(attrs, slog.Group("context", slog.Any("reportLocation", reportLocation{
 		FilePath:     f.File,
 		LineNumber:   f.Line,
 		FunctionName: f.Function,
 	})))
 	if stack := stackFrom(r.PC); stack != "" {
-		attrs = append(attrs, slog.String("stack_trace", errorSummary(r)+"\n\n"+stack))
+		if summary := errorSummary(r); summary != "" {
+			stack = summary + "\n\n" + stack
+		}
+		attrs = append(attrs, slog.String("stack_trace", stack))
 	}
 	return attrs
 }
@@ -72,7 +76,7 @@ func errorSummary(r slog.Record) string {
 	var errMsg string
 	r.Attrs(func(a slog.Attr) bool {
 		if err, ok := a.Value.Resolve().Any().(error); ok {
-			errMsg = err.Error()
+			errMsg = errorString(err)
 			return false
 		}
 		return true
@@ -87,12 +91,35 @@ func errorSummary(r slog.Record) string {
 	}
 }
 
+// errorString recovers a panic in Error, like slog does when writing the value,
+// because a typed nil pointer error must not crash the log call.
+func errorString(err error) (s string) {
+	defer func() {
+		if r := recover(); r != nil {
+			if v := reflect.ValueOf(err); v.Kind() == reflect.Pointer && v.IsNil() {
+				s = "<nil>"
+				return
+			}
+			s = fmt.Sprintf("!PANIC: %v", r)
+		}
+	}()
+	return err.Error()
+}
+
 // stackFrom formats the current call stack from the frame of pc in the format of runtime/debug.Stack,
 // which Error Reporting parses as a Go stack trace.
 // It returns "" if pc is not in the current call stack, e.g. when the record is handled in another goroutine.
 func stackFrom(pc uintptr) string {
 	pcs := make([]uintptr, 128)
-	pcs = pcs[:runtime.Callers(0, pcs)]
+	for {
+		n := runtime.Callers(0, pcs)
+		if n < len(pcs) {
+			pcs = pcs[:n]
+			break
+		}
+		// The stack may be deeper than pcs, and runtime/debug.Stack does not truncate it either.
+		pcs = make([]uintptr, len(pcs)*2)
+	}
 	i := slices.Index(pcs, pc)
 	if i < 0 {
 		return ""

@@ -230,7 +230,61 @@ func TestErrorReporting_FieldsAreTopLevelUnderGroup(t *testing.T) {
 	}
 }
 
+type pointerError struct{ msg string }
+
+func (e *pointerError) Error() string { return e.msg }
+
+func TestErrorReporting_TypedNilErrorDoesNotPanic(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slogdriver.New(&buf, slogdriver.HandlerOptions{
+		ErrorReporting: &slogdriver.ErrorReportingOptions{Service: "my-service"},
+	})
+	var err *pointerError
+
+	logger.Error("something failed", slog.Any("error", err))
+
+	firstLine, _, _ := strings.Cut(decodeErrorReportingEntry(t, &buf).StackTrace, "\n")
+	if want := "something failed: <nil>"; firstLine != want {
+		t.Errorf("first line of stack_trace = %q, want %q", firstLine, want)
+	}
+}
+
+func logAtDepth(logger *slog.Logger, depth int) {
+	if depth == 0 {
+		logger.Error("deep")
+		return
+	}
+	logAtDepth(logger, depth-1)
+}
+
+func TestErrorReporting_DeepStackIsNotTruncated(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slogdriver.New(&buf, slogdriver.HandlerOptions{
+		ErrorReporting: &slogdriver.ErrorReportingOptions{Service: "my-service"},
+	})
+
+	logAtDepth(logger, 300)
+
+	stack := decodeErrorReportingEntry(t, &buf).StackTrace
+	if got := strings.Count(stack, "logAtDepth(...)"); got != 301 {
+		t.Errorf("logAtDepth frames = %d, want 301", got)
+	}
+}
+
 func removeTime(t *testing.T, b []byte) string {
 	t.Helper()
 	return string(regexp.MustCompile(`"time":"[^"]*",`).ReplaceAll(b, nil))
+}
+
+func TestErrorReporting_StackTraceStartsWithGoroutineWhenNoMessageAndNoError(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slogdriver.New(&buf, slogdriver.HandlerOptions{
+		ErrorReporting: &slogdriver.ErrorReportingOptions{Service: "my-service"},
+	})
+
+	logger.Error("")
+
+	if stack := decodeErrorReportingEntry(t, &buf).StackTrace; !goStackTrace.MatchString(stack) {
+		t.Errorf("stack_trace is not in Go format:\n%q", stack)
+	}
 }

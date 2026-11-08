@@ -12,8 +12,7 @@ type LogEntrySourceLocation struct {
 	Function string `json:"function"`
 }
 
-func (c *cloudLoggingHandler) makeSourceLocationAttr(r slog.Record) slog.Attr {
-	f := recordFrame(r)
+func makeSourceLocationAttr(f runtime.Frame) slog.Attr {
 	return slog.Any(SourceLocationKey, LogEntrySourceLocation{
 		File:     f.File,
 		Line:     fmt.Sprint(f.Line),
