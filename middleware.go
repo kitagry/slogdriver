@@ -7,7 +7,6 @@ import (
 	"strconv"
 	"strings"
 
-	opencensusTrace "go.opencensus.io/trace"
 	"go.opentelemetry.io/otel/propagation"
 	opentelemetryTrace "go.opentelemetry.io/otel/trace"
 )
@@ -18,23 +17,17 @@ import (
 // Invalid headers are ignored.
 //
 // The trace context is stored as an OpenTelemetry remote span context.
-// If the request context already has a span (e.g. by otelhttp or ochttp), it is kept as is.
+// If the request context already has a span (e.g. by otelhttp), it is kept as is.
 func Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
-		if !hasSpan(ctx) {
+		if !opentelemetryTrace.SpanContextFromContext(ctx).IsValid() {
 			if spanCtx, ok := spanContextFromHeader(r.Header); ok {
 				r = r.WithContext(opentelemetryTrace.ContextWithRemoteSpanContext(ctx, spanCtx))
 			}
 		}
 		next.ServeHTTP(w, r)
 	})
-}
-
-// hasSpan checks OpenCensus too, because the OpenTelemetry span added by the middleware
-// would take precedence over the OpenCensus span in traceAttrsFromContext.
-func hasSpan(ctx context.Context) bool {
-	return opentelemetryTrace.SpanContextFromContext(ctx).IsValid() || opencensusTrace.FromContext(ctx) != nil
 }
 
 func spanContextFromHeader(h http.Header) (opentelemetryTrace.SpanContext, bool) {

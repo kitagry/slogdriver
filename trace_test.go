@@ -8,36 +8,12 @@ import (
 	"testing"
 
 	"github.com/kitagry/slogdriver"
-	opencensusTrace "go.opencensus.io/trace"
 	"go.opentelemetry.io/contrib/detectors/gcp"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	opentelemetryTrace "go.opentelemetry.io/otel/trace"
 )
-
-func TestCloudLoggingHandler_HandleTraceShouldHaveOpencensusTraceKeys(t *testing.T) {
-	t.Setenv("GOOGLE_CLOUD_PROJECT", "test-project")
-
-	var buf bytes.Buffer
-	logger := slogdriver.New(&buf, slogdriver.HandlerOptions{})
-
-	ctx, span := opencensusTrace.StartSpan(context.Background(), "test-span")
-	defer span.End()
-
-	logger.InfoContext(ctx, "Hello World")
-
-	var got map[string]any
-	err := json.NewDecoder(&buf).Decode(&got)
-	if err != nil {
-		t.Fatalf("failed to decode json: %+v", err)
-	}
-
-	_, ok := got[slogdriver.TraceKey]
-	if !ok {
-		t.Errorf("log should have key=%s, got %v", slogdriver.TraceKey, got)
-	}
-}
 
 func TestCloudLoggingHandler_HandleTraceShouldHaveOpentelemetryTraceKeys(t *testing.T) {
 	t.Setenv("GOOGLE_CLOUD_PROJECT", "test-project")
@@ -179,21 +155,6 @@ func TestCloudLoggingHandler_HandleTraceShouldNotMixManualAndContextTrace(t *tes
 			t.Errorf("key=%s should not be added from the context: %s", key, out)
 		}
 	}
-}
-
-func TestCloudLoggingHandler_HandleTraceShouldPreferOpentelemetryOverOpencensus(t *testing.T) {
-	var buf bytes.Buffer
-	logger := slogdriver.New(&buf, slogdriver.HandlerOptions{ProjectID: "test-project"})
-	ctx, spanCtx := newOtelContext(t)
-	ctx, span := opencensusTrace.StartSpan(ctx, "test-span")
-	defer span.End()
-
-	logger.InfoContext(ctx, "Hello World")
-
-	assertTraceKeysOnce(t, buf.Bytes(), map[string]any{
-		slogdriver.TraceKey:  "projects/test-project/traces/" + spanCtx.TraceID().String(),
-		slogdriver.SpanIDKey: spanCtx.SpanID().String(),
-	})
 }
 
 func TestCloudLoggingHandler_HandleTraceShouldUseTraceIDOnlyWithoutProjectID(t *testing.T) {

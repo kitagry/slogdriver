@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/kitagry/slogdriver"
-	opencensusTrace "go.opencensus.io/trace"
 	opentelemetryTrace "go.opentelemetry.io/otel/trace"
 )
 
@@ -190,21 +189,6 @@ func TestMiddleware_ShouldKeepExistingSpanInContext(t *testing.T) {
 
 	if !got.Equal(existing) {
 		t.Errorf("existing span context should be kept, expected %+v, got %+v", existing, got)
-	}
-}
-
-func TestMiddleware_ShouldKeepExistingOpencensusSpanInContext(t *testing.T) {
-	ctx, span := opencensusTrace.StartSpan(t.Context(), "test-span")
-	defer span.End()
-
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.Header.Set("traceparent", "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01")
-	req = req.WithContext(ctx)
-
-	got := serveWithMiddleware(t, req)
-
-	if got.IsValid() {
-		t.Errorf("span context should not be set when an OpenCensus span exists, got %+v", got)
 	}
 }
 

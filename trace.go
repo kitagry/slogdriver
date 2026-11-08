@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"slices"
 
-	opencensusTrace "go.opencensus.io/trace"
 	opentelemetryTrace "go.opentelemetry.io/otel/trace"
 )
 
@@ -32,17 +31,10 @@ func isTraceAttr(a slog.Attr) bool {
 	return false
 }
 
-// traceAttrsFromContext prefers OpenTelemetry to OpenCensus because OpenCensus is deprecated.
 func (c *cloudLoggingHandler) traceAttrsFromContext(ctx context.Context) []slog.Attr {
 	if spanCtx := opentelemetryTrace.SpanContextFromContext(ctx); spanCtx.IsValid() {
 		return c.makeTraceAttrs(spanCtx.TraceID().String(), spanCtx.SpanID().String(), spanCtx.IsSampled())
 	}
-
-	if span := opencensusTrace.FromContext(ctx); span != nil {
-		spanCtx := span.SpanContext()
-		return c.makeTraceAttrs(spanCtx.TraceID.String(), spanCtx.SpanID.String(), spanCtx.IsSampled())
-	}
-
 	return nil
 }
 

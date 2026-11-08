@@ -111,7 +111,7 @@ http.ListenAndServe(":8080", slogdriver.Middleware(mux))
 - When both headers exist, `traceparent` is used. Invalid headers are ignored. `tracestate` is kept together with `traceparent`.
 - The span ID of `X-Cloud-Trace-Context` is a decimal number, so it is converted to 16 hex digits.
 - The trace context is stored as an OpenTelemetry remote span context (`trace.ContextWithRemoteSpanContext`), so `trace.SpanContextFromContext(r.Context())` also returns it.
-- If the request context already has a valid OpenTelemetry span or an OpenCensus span, the middleware does nothing. So, when you use it with `otelhttp`, the span created by `otelhttp` is used. If you put `slogdriver.Middleware` outside `otelhttp`, the span from the header becomes the parent of the `otelhttp` span (unless the propagator of `otelhttp` extracts another parent).
+- If the request context already has a valid OpenTelemetry span, the middleware does nothing. So, when you use it with `otelhttp`, the span created by `otelhttp` is used. If you put `slogdriver.Middleware` outside `otelhttp`, the span from the header becomes the parent of the `otelhttp` span (unless the propagator of `otelhttp` extracts another parent).
 
 If neither `ProjectID` nor `GOOGLE_CLOUD_PROJECT` is set, trace is written as the trace ID only (e.g. `"logging.googleapis.com/trace":"0af7651916cd43dd8448eb211c80319c"`), which Cloud Logging also accepts. You can still filter logs by the trace ID, but set `ProjectID` (or `GOOGLE_CLOUD_PROJECT`) to group them with the request log and link them to Cloud Trace, because the request log uses `projects/PROJECT_ID/traces/TRACE_ID`.
 
@@ -157,7 +157,22 @@ You can see [example for Cloud Run](./examples/cloudrun).
 
 If you set any of `slogdriver.TraceKey`, `slogdriver.SpanIDKey` or `slogdriver.TraceSampledKey` manually (in log arguments or `With`), trace information from the context is not added, so that a manual trace is not mixed with a span of another trace.
 For the same reason, if the log arguments have any of these keys, all of them set by `With` are ignored.
-When both OpenTelemetry and OpenCensus spans are in the context, the OpenTelemetry span is used.
+
+##### OpenCensus
+
+OpenCensus spans are not supported since v0.3.0, because OpenCensus was archived in 2023. Migrate to OpenTelemetry, or install the [OpenCensus bridge](https://pkg.go.dev/go.opentelemetry.io/otel/bridge/opencensus) with an OpenTelemetry tracer provider, so that the trace of OpenCensus spans is written:
+
+```go
+import (
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/bridge/opencensus"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+)
+
+// Add an exporter (e.g. sdktrace.WithBatcher(exporter)) to send the spans to Cloud Trace.
+otel.SetTracerProvider(sdktrace.NewTracerProvider())
+opencensus.InstallTraceBridge()
+```
 
 #### Labels
 
