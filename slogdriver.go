@@ -44,6 +44,8 @@ type cloudLoggingHandler struct {
 	// withKnownKeys holds known keys passed to WithAttrs, which are already written by Handler.
 	withKnownKeys map[string]struct{}
 	opts          HandlerOptions
+	// serviceContext is nil when Error Reporting is disabled.
+	serviceContext *serviceContext
 }
 
 type group struct {
@@ -72,6 +74,10 @@ type HandlerOptions struct {
 
 	// DefaultLabels is a set of default labels to be added to each log entry.
 	DefaultLabels []slog.Attr
+
+	// ErrorReporting makes logs at slog.LevelError or above reported to Cloud Error Reporting.
+	// If nil, logs are written as before.
+	ErrorReporting *ErrorReportingOptions
 }
 
 func New(w io.Writer, opts HandlerOptions) *slog.Logger {
@@ -114,10 +120,15 @@ func NewHandler(w io.Writer, opts HandlerOptions) slog.Handler {
 		},
 	}
 
-	return &cloudLoggingHandler{
+	h := &cloudLoggingHandler{
 		Handler: slog.NewJSONHandler(w, &slogOpts),
 		opts:    opts,
 	}
+	if opts.ErrorReporting != nil {
+		sc := newServiceContext(opts.ErrorReporting)
+		h.serviceContext = &sc
+	}
+	return h
 }
 
 var _ slog.Handler = (*cloudLoggingHandler)(nil)
@@ -164,6 +175,10 @@ func (c *cloudLoggingHandler) Handle(ctx context.Context, r slog.Record) error {
 	}
 
 	c.handleTrace(ctx, &newRecord, knownAttrs)
+
+	if c.serviceContext != nil && r.Level >= slog.LevelError {
+		newRecord.AddAttrs(c.errorReportingAttrs(r)...)
+	}
 
 	return c.Handler.Handle(ctx, newRecord)
 }
@@ -221,11 +236,12 @@ func (c *cloudLoggingHandler) WithGroup(name string) slog.Handler {
 
 func (c *cloudLoggingHandler) clone(handler slog.Handler) *cloudLoggingHandler {
 	return &cloudLoggingHandler{
-		Handler:       handler,
-		labels:        slices.Clone(c.labels),
-		groups:        slices.Clone(c.groups),
-		withKnownKeys: c.withKnownKeys, // read-only; WithAttrs copies it before adding keys
-		opts:          c.opts,
+		Handler:        handler,
+		labels:         slices.Clone(c.labels),
+		groups:         slices.Clone(c.groups),
+		withKnownKeys:  c.withKnownKeys, // read-only; WithAttrs copies it before adding keys
+		opts:           c.opts,
+		serviceContext: c.serviceContext,
 	}
 }
 

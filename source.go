@@ -13,11 +13,16 @@ type LogEntrySourceLocation struct {
 }
 
 func (c *cloudLoggingHandler) makeSourceLocationAttr(r slog.Record) slog.Attr {
-	fs := runtime.CallersFrames([]uintptr{r.PC})
-	f, _ := fs.Next()
+	f := recordFrame(r)
 	return slog.Any(SourceLocationKey, LogEntrySourceLocation{
 		File:     f.File,
 		Line:     fmt.Sprint(f.Line),
 		Function: f.Function,
 	})
+}
+
+func recordFrame(r slog.Record) runtime.Frame {
+	fs := runtime.CallersFrames([]uintptr{r.PC})
+	f, _ := fs.Next()
+	return f
 }

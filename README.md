@@ -190,6 +190,25 @@ logger.Info("Hello World")
 // {"severity":"INFO","message":"Hello World","logging.googleapis.com/sourceLocation":{"file":"/path/to/source.go","line":"12","function":"yourFunction"}}
 ```
 
+#### Error Reporting
+
+Set `ErrorReporting` to report logs at `slog.LevelError` or above to [Cloud Error Reporting](https://cloud.google.com/error-reporting/docs/formatting-error-messages). It is disabled by default, and logs below `slog.LevelError` are not changed.
+
+```go
+logger := slogdriver.New(os.Stdout, slogdriver.HandlerOptions{
+	ErrorReporting: &slogdriver.ErrorReportingOptions{Service: "my-service", Version: "v1.0.0"},
+})
+logger.Error("failed to save user", slog.Any("error", err))
+// got:
+// {"severity":"ERROR","message":"failed to save user","error":"connection refused","@type":"type.googleapis.com/google.devtools.clouderrorreporting.v1beta1.ReportedErrorEvent","serviceContext":{"service":"my-service","version":"v1.0.0"},"context":{"reportLocation":{"filePath":"/path/to/main.go","lineNumber":12,"functionName":"main.saveUser"}},"stack_trace":"failed to save user: connection refused\n\ngoroutine 1 [running]:\nmain.saveUser(...)\n\t/path/to/main.go:12 +0x1d\nmain.main(...)\n\t/path/to/main.go:20 +0x25\n"}
+```
+
+- `Service` and `Version` default to the `K_SERVICE` and `K_REVISION` environment variables set by Cloud Run. If `Service` is still empty, the executable name is used. If `Version` is still empty, it is omitted.
+- `context.reportLocation` is the location of the log call.
+- `stack_trace` is the call stack from the log call, in the format of `runtime/debug.Stack`. Its first line is the message, followed by the first `error` value in the log arguments (`"message: error"`). Error Reporting uses this line as the error message.
+- When the record is handled in another goroutine than the log call (e.g. an asynchronous handler wraps slogdriver), `stack_trace` is omitted and only `context.reportLocation` is written.
+- Do not use `@type`, `serviceContext`, `context` or `stack_trace` as top-level keys of your own attributes for error logs, because they would be written twice.
+
 ## TODO
 
 - [x] severity
